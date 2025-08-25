@@ -1,0 +1,56 @@
+name = "vivenu-event-monitor"
+main = "src/index.ts"
+compatibility_date = "2025-08-23"
+compatibility_flags = ["global_fetch_strictly_public"]
+account_id = "7b67476729e32b63bb323f64706075c0"
+
+# KV Namespace for caching and rate limiting
+[[kv_namespaces]]
+binding = "KV"
+id = "d40c6ee183574f0193a600ecfe00ecfc"
+preview_id = "caf7d381c9144efeaf6a1ce29b197ab3"
+
+# Scheduled cron trigger - runs daily at 2 AM UTC
+[triggers]
+crons = ["0 2 * * *"]
+
+# Environment variables (non-sensitive)
+[vars]
+GOOGLE_SHEET_ID = "YOUR_GOOGLE_SHEET_ID"
+ENVIRONMENT = "production"
+
+# Observability
+[observability]
+enabled = true
+
+# Development environment
+[env.development]
+name = "vivenu-event-monitor-dev"
+vars = { ENVIRONMENT = "development" }
+
+[[env.development.kv_namespaces]]
+binding = "KV"
+id = "caf7d381c9144efeaf6a1ce29b197ab3"
+
+# Staging environment
+[env.staging]
+name = "vivenu-event-monitor-staging"
+vars = { ENVIRONMENT = "staging" }
+
+[[env.staging.kv_namespaces]]
+binding = "KV"
+id = "d40c6ee183574f0193a600ecfe00ecfc"
+
+# Note: Sensitive data should be added via wrangler secrets:
+# wrangler secret put VIVENU_SECRET
+# wrangler secret put DACH_API
+# wrangler secret put FRANCE_API
+# wrangler secret put ITALY_API
+# wrangler secret put BENELUX_API
+# wrangler secret put USA_API
+# wrangler secret put CANADA_API
+# wrangler secret put AUSTRALIA_API
+# wrangler secret put NORWAY_API
+# wrangler secret put SWITZERLAND_API
+# wrangler secret put GOOGLE_SERVICE_ACCOUNT_EMAIL
+# wrangler secret put GOOGLE_PRIVATE_KEY
