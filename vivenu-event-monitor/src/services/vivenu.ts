@@ -35,7 +35,7 @@ export class VivenuClient {
   private rateLimiter: RateLimiter;
   private eventTracker: EventTracker;
 
-  constructor(region: string, apiKey: string, baseUrl: 'PROD' | 'DEV', kv: KVNamespace) {
+  constructor(region: string, apiKey: string, baseUrl: 'PROD' | 'DEV', kv: KVNamespace | null) {
     this.region = region;
     this.baseUrl = BASE_URLS[baseUrl];
     this.apiKey = apiKey;
@@ -226,7 +226,7 @@ export function createVivenuClients(env: Env): VivenuClient[] {
       continue;
     }
     
-    clients.push(new VivenuClient(region.name, apiKey, region.baseUrl, env.KV));
+    clients.push(new VivenuClient(region.name, apiKey, region.baseUrl, env.KV || null));
   }
   
   return clients;

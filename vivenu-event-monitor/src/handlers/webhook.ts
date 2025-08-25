@@ -101,7 +101,7 @@ async function processEventUpdate(
     }
 
     // Track sales date changes immediately from webhook data
-    const eventTracker = new EventTracker(env.KV);
+    const eventTracker = new EventTracker(env.KV || null);
     
     // Find the region for this seller by trying each API key
     const clients = createVivenuClients(env);

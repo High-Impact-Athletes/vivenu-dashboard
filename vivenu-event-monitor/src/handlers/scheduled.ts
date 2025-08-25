@@ -5,16 +5,37 @@ import { GoogleSheetsClient } from '../services/sheets';
 import { EventTracker } from '../services/tracking';
 import { log } from '../services/validation';
 
-export async function handleScheduledPoll(controller: ScheduledController, env: Env): Promise<void> {
+export interface PollResult {
+  status: 'completed' | 'failed' | 'partial';
+  timestamp: string;
+  totalEvents: number;
+  totalDurationMs: number;
+  regionStats: Record<string, any>;
+  sheetsUpdated: boolean;
+  errors: string[];
+}
+
+export async function performEventPoll(env: Env, source: 'scheduled' | 'manual' = 'scheduled', targetRegion?: string): Promise<PollResult> {
   const startTime = Date.now();
+  const errors: string[] = [];
   
-  log('info', 'Starting scheduled poll of all events', {
-    scheduledTime: new Date(controller.scheduledTime).toISOString(),
-    environment: env.ENVIRONMENT
+  log('info', `Starting ${source} poll${targetRegion ? ` for region ${targetRegion}` : ' of all events'}`, {
+    timestamp: new Date().toISOString(),
+    environment: env.ENVIRONMENT,
+    targetRegion: targetRegion || 'all'
   });
 
   try {
-    const clients = createVivenuClients(env);
+    let clients = createVivenuClients(env);
+    
+    // Filter to specific region if requested
+    if (targetRegion) {
+      clients = clients.filter(client => client.region === targetRegion);
+      if (clients.length === 0) {
+        throw new Error(`Invalid or disabled region: ${targetRegion}`);
+      }
+    }
+    
     const allEventMetrics: EventMetrics[] = [];
     const regionStats: Record<string, any> = {};
 
@@ -39,9 +60,20 @@ export async function handleScheduledPoll(controller: ScheduledController, env: 
           hyroxEvents: hyroxEvents.length
         });
 
+        // For manual testing, process only the first HYROX event to avoid timeouts
+        const eventsToProcess = source === 'manual' ? hyroxEvents.slice(0, 1) : hyroxEvents;
+        
+        if (source === 'manual' && eventsToProcess.length > 0) {
+          log('info', `Processing single event for manual test: ${eventsToProcess[0].name}`, {
+            eventId: eventsToProcess[0]._id,
+            eventName: eventsToProcess[0].name,
+            region: client.region
+          });
+        }
+
         // Get metrics for each HYROX event
         const eventMetrics: EventMetrics[] = [];
-        for (const event of hyroxEvents) {
+        for (const event of eventsToProcess) {
           try {
             const metrics = await client.getTicketMetrics(event._id);
             if (metrics) {
@@ -52,6 +84,8 @@ export async function handleScheduledPoll(controller: ScheduledController, env: 
             await new Promise(resolve => setTimeout(resolve, 200));
             
           } catch (error) {
+            const errorMessage = `Failed to get metrics for event ${event._id} in ${client.region}: ${(error as Error).message}`;
+            errors.push(errorMessage);
             log('warn', `Failed to get metrics for event ${event._id}`, {
               region: client.region,
               eventId: event._id,
@@ -77,6 +111,9 @@ export async function handleScheduledPoll(controller: ScheduledController, env: 
         });
 
       } catch (error) {
+        const errorMessage = `Failed to poll region ${client.region}: ${(error as Error).message}`;
+        errors.push(errorMessage);
+        
         log('error', `Failed to poll region ${client.region}`, {
           error: (error as Error).message,
           stack: (error as Error).stack
@@ -89,48 +126,96 @@ export async function handleScheduledPoll(controller: ScheduledController, env: 
       }
     }
 
+    let sheetsUpdated = false;
+    
     // Update Google Sheets with all collected data
     if (allEventMetrics.length > 0) {
-      log('info', `Updating Google Sheets with ${allEventMetrics.length} events`);
-      
-      const sheetsClient = new GoogleSheetsClient(env);
-      await sheetsClient.updateEventsSheet(allEventMetrics);
-      await sheetsClient.updateTicketTypesSheet(allEventMetrics);
-      
-      // Update sales date changes sheet with recent changes
-      const eventTracker = new EventTracker(env.KV);
-      const recentChanges = await eventTracker.getRecentChanges(100);
-      if (recentChanges.length > 0) {
-        await sheetsClient.updateSalesDateChangesSheet(recentChanges);
-        log('info', `Updated Sales Date Changes sheet with ${recentChanges.length} changes`);
+      try {
+        log('info', `Updating Google Sheets with ${allEventMetrics.length} events`);
+        
+        const sheetsClient = new GoogleSheetsClient(env);
+        await sheetsClient.updateEventsSheet(allEventMetrics);
+        await sheetsClient.updateTicketTypesSheet(allEventMetrics);
+        
+        // Update sales date changes sheet with recent changes
+        const eventTracker = new EventTracker(env.KV || null);
+        const recentChanges = await eventTracker.getRecentChanges(100);
+        if (recentChanges.length > 0) {
+          await sheetsClient.updateSalesDateChangesSheet(recentChanges);
+          log('info', `Updated Sales Date Changes sheet with ${recentChanges.length} changes`);
+        }
+        
+        // Cache the last successful poll
+        if (env.KV) {
+          await cacheLastPoll(allEventMetrics, env.KV);
+        }
+        
+        sheetsUpdated = true;
+        log('info', 'Successfully updated Google Sheets');
+      } catch (error) {
+        const errorMessage = `Failed to update Google Sheets: ${(error as Error).message}`;
+        errors.push(errorMessage);
+        log('error', 'Failed to update Google Sheets', {
+          error: (error as Error).message,
+          stack: (error as Error).stack
+        });
       }
-      
-      // Cache the last successful poll
-      await cacheLastPoll(allEventMetrics, env.KV);
-      
-      log('info', 'Successfully updated Google Sheets');
     } else {
       log('warn', 'No event metrics collected to update sheets');
     }
 
     const totalDuration = Date.now() - startTime;
     
-    log('info', 'Completed scheduled poll', {
+    const result: PollResult = {
+      status: errors.length === 0 ? 'completed' : (allEventMetrics.length > 0 ? 'partial' : 'failed'),
+      timestamp: new Date().toISOString(),
       totalEvents: allEventMetrics.length,
       totalDurationMs: totalDuration,
-      regionStats
+      regionStats,
+      sheetsUpdated,
+      errors
+    };
+    
+    log('info', `Completed ${source} poll`, {
+      totalEvents: allEventMetrics.length,
+      totalDurationMs: totalDuration,
+      status: result.status,
+      errorsCount: errors.length
     });
+
+    return result;
 
   } catch (error) {
     const totalDuration = Date.now() - startTime;
+    const errorMessage = `Poll failed: ${(error as Error).message}`;
     
-    log('error', 'Scheduled poll failed', {
+    log('error', `${source} poll failed`, {
       error: (error as Error).message,
       stack: (error as Error).stack,
       durationMs: totalDuration
     });
     
-    throw error;
+    return {
+      status: 'failed',
+      timestamp: new Date().toISOString(),
+      totalEvents: 0,
+      totalDurationMs: totalDuration,
+      regionStats: {},
+      sheetsUpdated: false,
+      errors: [errorMessage]
+    };
+  }
+}
+
+export async function handleScheduledPoll(controller: ScheduledController, env: Env): Promise<void> {
+  log('info', 'Starting scheduled poll', {
+    scheduledTime: new Date(controller.scheduledTime).toISOString()
+  });
+
+  const result = await performEventPoll(env, 'scheduled');
+  
+  if (result.status === 'failed') {
+    throw new Error(`Scheduled poll failed: ${result.errors.join(', ')}`);
   }
 }
 

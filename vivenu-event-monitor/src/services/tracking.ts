@@ -3,13 +3,18 @@ import { VivenuEvent } from '../types/vivenu';
 import { log } from './validation';
 
 export class EventTracker {
-  private kv: KVNamespace;
+  private kv: KVNamespace | null;
 
-  constructor(kv: KVNamespace) {
+  constructor(kv: KVNamespace | null) {
     this.kv = kv;
   }
 
   async trackEvent(event: VivenuEvent, region: string, source: 'webhook' | 'polling'): Promise<SalesDateChange[]> {
+    if (!this.kv) {
+      // If KV is not available, return empty changes
+      return [];
+    }
+    
     const historyKey = `event_history:${event._id}`;
     const existingHistoryJson = await this.kv.get(historyKey);
     const existingHistory: EventHistory | null = existingHistoryJson 
@@ -65,9 +70,11 @@ export class EventTracker {
     };
 
     // Store updated history
-    await this.kv.put(historyKey, JSON.stringify(updatedHistory), {
-      expirationTtl: 365 * 24 * 60 * 60 // Keep for 1 year
-    });
+    if (this.kv) {
+      await this.kv.put(historyKey, JSON.stringify(updatedHistory), {
+        expirationTtl: 365 * 24 * 60 * 60 // Keep for 1 year
+      });
+    }
 
     // Log changes
     if (changes.length > 0) {
@@ -92,6 +99,17 @@ export class EventTracker {
   }
 
   async createSalesDateAlert(change: SalesDateChange): Promise<void> {
+    if (!this.kv) {
+      // If KV is not available, just log and return
+      log('warn', `Sales date change detected (KV unavailable): ${change.changeType} for ${change.eventName}`, {
+        eventId: change.eventId,
+        region: change.region,
+        changeType: change.changeType,
+        previousValue: change.previousValue,
+        newValue: change.newValue
+      });
+      return;
+    }
     const alert: SalesAlert = {
       id: `alert_${change.eventId}_${change.changeType}_${Date.now()}`,
       eventId: change.eventId,
@@ -177,6 +195,10 @@ export class EventTracker {
   }
 
   async getRecentChanges(limit: number = 50): Promise<SalesDateChange[]> {
+    if (!this.kv) {
+      return [];
+    }
+    
     const alertsListKey = 'recent_alerts';
     const alertsListJson = await this.kv.get(alertsListKey);
     const alertIds: string[] = alertsListJson ? JSON.parse(alertsListJson) : [];
@@ -208,6 +230,10 @@ export class EventTracker {
   }
 
   async getEventHistory(eventId: string): Promise<EventHistory | null> {
+    if (!this.kv) {
+      return null;
+    }
+    
     const historyKey = `event_history:${eventId}`;
     const historyJson = await this.kv.get(historyKey);
     return historyJson ? JSON.parse(historyJson) : null;

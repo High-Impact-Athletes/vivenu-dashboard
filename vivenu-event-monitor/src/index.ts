@@ -1,6 +1,6 @@
 import { Env } from './types/env';
 import { handleEventUpdatedWebhook } from './handlers/webhook';
-import { handleScheduledPoll } from './handlers/scheduled';
+import { handleScheduledPoll, performEventPoll } from './handlers/scheduled';
 import { EventTracker } from './services/tracking';
 import { log } from './services/validation';
 
@@ -18,6 +18,9 @@ export default {
 				
 				case '/status':
 					return await handleStatus(env);
+				
+				case '/poll/manual':
+					return await handleManualPoll(request, env);
 				
 				default:
 					return new Response('Not Found', { status: 404 });
@@ -139,5 +142,73 @@ async function getRecentWebhookStats(kv: KVNamespace): Promise<any> {
 		return {
 			error: 'Failed to fetch webhook stats'
 		};
+	}
+}
+
+async function handleManualPoll(request: Request, env: Env): Promise<Response> {
+	try {
+		// Allow both GET and POST requests
+		if (request.method !== 'GET' && request.method !== 'POST') {
+			return new Response('Method Not Allowed', { 
+				status: 405,
+				headers: { 'Allow': 'GET, POST' }
+			});
+		}
+
+		// Parse query parameters
+		const url = new URL(request.url);
+		const region = url.searchParams.get('region')?.toUpperCase() || undefined;
+
+		log('info', 'Manual poll triggered', {
+			method: request.method,
+			region: region || 'all',
+			userAgent: request.headers.get('User-Agent'),
+			timestamp: new Date().toISOString()
+		});
+
+		// Execute the poll
+		const pollResult = await performEventPoll(env, 'manual', region);
+
+		// Return detailed response
+		const response = {
+			...pollResult,
+			message: pollResult.status === 'completed' ? 
+				`Manual poll completed successfully${region ? ` for region ${region}` : ''}` : 
+				pollResult.status === 'partial' ? 
+					`Manual poll completed with some errors${region ? ` for region ${region}` : ''}` : 
+					`Manual poll failed${region ? ` for region ${region}` : ''}`,
+			endpoint: '/poll/manual',
+			triggeredBy: 'manual',
+			requestedRegion: region || 'all'
+		};
+
+		const httpStatus = pollResult.status === 'completed' ? 200 : 
+						  pollResult.status === 'partial' ? 207 : 500;
+
+		return new Response(JSON.stringify(response, null, 2), {
+			headers: {
+				'Content-Type': 'application/json',
+				'Cache-Control': 'no-cache'
+			},
+			status: httpStatus
+		});
+
+	} catch (error) {
+		log('error', 'Manual poll handler failed', {
+			error: (error as Error).message,
+			stack: (error as Error).stack
+		});
+
+		return new Response(JSON.stringify({
+			status: 'failed',
+			timestamp: new Date().toISOString(),
+			message: 'Manual poll handler failed',
+			error: (error as Error).message,
+			endpoint: '/poll/manual',
+			triggeredBy: 'manual'
+		}), {
+			headers: { 'Content-Type': 'application/json' },
+			status: 500
+		});
 	}
 }

@@ -1,6 +1,6 @@
 export interface Env {
   // KV Namespace binding
-  KV: KVNamespace;
+  KV?: KVNamespace;
 
   // Environment variables
   GOOGLE_SHEET_ID?: string;
