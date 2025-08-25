@@ -2,6 +2,7 @@ import { EventMetrics, TicketTypeMetrics } from '../types/vivenu';
 import { SalesDateChange } from '../types/tracking';
 import { Env } from '../types/env';
 import { fetchWithRetry } from '../utils/retry';
+import { settings } from './settings';
 import { log } from './validation';
 
 interface GoogleSheetsAuth {
@@ -17,23 +18,46 @@ export class GoogleSheetsClient {
   private serviceAccountEmail: string;
   private privateKey: string;
   private sheetId: string;
-  private kv: KVNamespace;
+  private kv: KVNamespace | null;
 
   constructor(env: Env) {
-    this.serviceAccountEmail = env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-    this.privateKey = env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
-    this.sheetId = env.GOOGLE_SHEET_ID;
-    this.kv = env.KV;
+    this.serviceAccountEmail = env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
+    this.privateKey = env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n') || '';
+    this.sheetId = env.GOOGLE_SHEET_ID || '';
+    this.kv = env.KV || null;
   }
 
-  private async getAccessToken(): Promise<string> {
+  async getAccessToken(): Promise<string> {
     // Check if we have a cached token
-    const cachedAuth = await this.kv.get('google_sheets_auth');
+    let cachedAuth = null;
+    if (this.kv) {
+      cachedAuth = await this.kv.get('google_sheets_auth');
+    }
+    
     if (cachedAuth) {
       const auth: GoogleSheetsAuth = JSON.parse(cachedAuth);
       if (auth.expires_at > Date.now()) {
+        log('info', 'Using cached Google Sheets access token');
         return auth.access_token;
       }
+      log('info', 'Cached token expired, generating new one');
+    }
+
+    log('info', 'Starting Google Sheets authentication', {
+      serviceAccountEmail: this.serviceAccountEmail ? 'configured' : 'missing',
+      privateKeyLength: this.privateKey ? this.privateKey.length : 0,
+      sheetId: this.sheetId ? 'configured' : 'missing'
+    });
+
+    // Validate required fields
+    if (!this.serviceAccountEmail) {
+      throw new Error('GOOGLE_SERVICE_ACCOUNT_EMAIL is not configured');
+    }
+    if (!this.privateKey) {
+      throw new Error('GOOGLE_PRIVATE_KEY is not configured');
+    }
+    if (!this.sheetId) {
+      throw new Error('GOOGLE_SHEET_ID is not configured');
     }
 
     // Generate new JWT token
@@ -51,6 +75,14 @@ export class GoogleSheetsClient {
       iat: now
     };
 
+    log('info', 'JWT payload created', {
+      issuer: payload.iss,
+      scope: payload.scope,
+      audience: payload.aud,
+      issuedAt: new Date(payload.iat * 1000).toISOString(),
+      expiresAt: new Date(payload.exp * 1000).toISOString()
+    });
+
     // Convert PEM format to proper format for Web Crypto API
     const pemHeader = '-----BEGIN PRIVATE KEY-----';
     const pemFooter = '-----END PRIVATE KEY-----';
@@ -58,6 +90,13 @@ export class GoogleSheetsClient {
       .replace(pemHeader, '')
       .replace(pemFooter, '')
       .replace(/\s/g, '');
+    
+    log('info', 'Processing private key', {
+      originalLength: this.privateKey.length,
+      hasHeader: this.privateKey.includes(pemHeader),
+      hasFooter: this.privateKey.includes(pemFooter),
+      contentsLength: pemContents.length
+    });
     
     const binaryDer = atob(pemContents);
     const privateKeyBuffer = new Uint8Array(binaryDer.length);
@@ -93,6 +132,11 @@ export class GoogleSheetsClient {
     const jwt = `${dataToSign}.${signatureB64}`;
 
     // Exchange JWT for access token
+    log('info', 'Exchanging JWT for access token', {
+      jwtLength: jwt.length,
+      grantType: 'urn:ietf:params:oauth:grant-type:jwt-bearer'
+    });
+
     const tokenResponse = await fetchWithRetry('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: {
@@ -106,153 +150,160 @@ export class GoogleSheetsClient {
 
     const tokenData: any = await tokenResponse.json();
     
+    log('info', 'Token exchange response', {
+      status: tokenResponse.status,
+      hasAccessToken: !!tokenData.access_token,
+      tokenType: tokenData.token_type,
+      expiresIn: tokenData.expires_in,
+      error: tokenData.error,
+      errorDescription: tokenData.error_description
+    });
+    
+    if (!tokenResponse.ok) {
+      throw new Error(`HTTP ${tokenResponse.status}: ${tokenResponse.statusText}. Error: ${tokenData.error || 'Unknown'}, Description: ${tokenData.error_description || 'No details'}`);
+    }
+    
     if (!tokenData.access_token) {
-      throw new Error('Failed to get access token from Google');
+      throw new Error(`Failed to get access token from Google. Error: ${tokenData.error || 'Unknown'}, Description: ${tokenData.error_description || 'No access_token in response'}`);
     }
 
-    // Cache the token
+    // Cache the token if KV is available
     const auth: GoogleSheetsAuth = {
       access_token: tokenData.access_token,
       expires_at: now + (tokenData.expires_in - 60) * 1000 // Subtract 60s for safety
     };
 
-    await this.kv.put('google_sheets_auth', JSON.stringify(auth), {
-      expirationTtl: tokenData.expires_in - 60
-    });
+    if (this.kv) {
+      await this.kv.put('google_sheets_auth', JSON.stringify(auth), {
+        expirationTtl: tokenData.expires_in - 60
+      });
+    }
 
     return tokenData.access_token;
   }
 
-  async updateEventsSheet(events: EventMetrics[]): Promise<void> {
+  async updateMasterSheet(events: EventMetrics[]): Promise<void> {
     try {
       const accessToken = await this.getAccessToken();
       
-      // Prepare data for batch update
+      log('info', 'Creating consolidated master sheet', {
+        eventsCount: events.length
+      });
+
+      // Step 1: Collect all unique ticket type names across all events
+      const allTicketNames = new Set<string>();
+      for (const event of events) {
+        for (const ticketType of event.ticketTypes) {
+          // Clean ticket name: remove special chars and normalize
+          const cleanName = ticketType.name
+            .replace(/[()]/g, '') // Remove parentheses
+            .replace(/\//g, '-') // Replace slashes with dashes
+            .replace(/\s+/g, ' ') // Normalize spaces
+            .trim();
+          allTicketNames.add(cleanName);
+        }
+      }
+
+      // Sort ticket names alphabetically for consistent column ordering
+      // Limit ticket types based on settings
+      const maxTicketTypes = settings.getMaxTicketTypes();
+      const sortedTicketNames = Array.from(allTicketNames).sort().slice(0, maxTicketTypes);
+      
+      log('info', 'Found unique ticket types', {
+        ticketTypes: sortedTicketNames,
+        count: sortedTicketNames.length
+      });
+
+      // Step 2: Create consolidated headers: Event metadata + ticket type columns
+      const soldSuffix = settings.getSoldSuffix();
+      const availableSuffix = settings.getAvailableSuffix();
+      
       const headers = [
         'Event ID', 'Region', 'Event Name', 'Event Date', 'Sales Launch Date', 
         'Status', 'Total Capacity', 'Total Sold', 'Total Available', 
         'Percent Sold', 'Last Updated'
       ];
-
-      const rows: SheetRow[] = events.map(event => ({
-        'Event ID': event.eventId,
-        'Region': event.region,
-        'Event Name': event.eventName,
-        'Event Date': new Date(event.eventDate).toLocaleDateString(),
-        'Sales Launch Date': event.salesStartDate ? new Date(event.salesStartDate).toLocaleDateString() : '',
-        'Status': event.status || '',
-        'Total Capacity': event.totalCapacity,
-        'Total Sold': event.totalSold,
-        'Total Available': event.totalAvailable,
-        'Percent Sold': `${event.percentSold}%`,
-        'Last Updated': new Date(event.lastUpdated).toLocaleString()
-      }));
-
-      await this.updateSheet('Events', headers, rows, accessToken);
       
-      log('info', `Updated Events sheet with ${events.length} events`);
-    } catch (error) {
-      log('error', 'Failed to update Events sheet', {
-        error: (error as Error).message
+      for (const ticketName of sortedTicketNames) {
+        headers.push(`${ticketName}${soldSuffix}`);
+        headers.push(`${ticketName}${availableSuffix}`);
+      }
+
+      log('info', 'Generated consolidated headers', {
+        totalHeaders: headers.length,
+        metadataColumns: 11,
+        ticketColumns: sortedTicketNames.length * 2
       });
-      throw error;
-    }
-  }
 
-  async updateTicketTypesSheet(events: EventMetrics[]): Promise<void> {
-    try {
-      const accessToken = await this.getAccessToken();
-      
-      const headers = [
-        'Event ID', 'Event Name', 'Region', 'Ticket Type ID', 'Ticket Name', 
-        'Price', 'Currency', 'Capacity', 'Sold', 'Available', 'Last Updated'
-      ];
-
+      // Step 3: Build consolidated data rows - one row per event with all data
       const rows: SheetRow[] = [];
       
       for (const event of events) {
-        for (const ticketType of event.ticketTypes) {
-          rows.push({
-            'Event ID': event.eventId,
-            'Event Name': event.eventName,
-            'Region': event.region,
-            'Ticket Type ID': ticketType.id,
-            'Ticket Name': ticketType.name,
-            'Price': ticketType.price,
-            'Currency': 'EUR', // Default, could be enhanced to track actual currency
-            'Capacity': ticketType.capacity,
-            'Sold': ticketType.sold,
-            'Available': ticketType.available,
-            'Last Updated': new Date(event.lastUpdated).toLocaleString()
-          });
+        // Start with event metadata
+        const row: SheetRow = {
+          'Event ID': event.eventId,
+          'Region': event.region,
+          'Event Name': event.eventName,
+          'Event Date': new Date(event.eventDate).toLocaleDateString(),
+          'Sales Launch Date': event.salesStartDate ? new Date(event.salesStartDate).toLocaleDateString() : '',
+          'Status': event.status || '',
+          'Total Capacity': event.totalCapacity,
+          'Total Sold': event.totalSold,
+          'Total Available': event.totalAvailable,
+          'Percent Sold': `${event.percentSold}%`,
+          'Last Updated': new Date(event.lastUpdated).toLocaleString()
+        };
+
+        // Initialize all ticket type columns to empty
+        for (const ticketName of sortedTicketNames) {
+          row[`${ticketName}${soldSuffix}`] = '';
+          row[`${ticketName}${availableSuffix}`] = '';
         }
+
+        // Populate columns for ticket types that exist in this event
+        for (const ticketType of event.ticketTypes) {
+          // Clean ticket name to match the header
+          const cleanName = ticketType.name
+            .replace(/[()]/g, '') // Remove parentheses
+            .replace(/\//g, '-') // Replace slashes with dashes
+            .replace(/\s+/g, ' ') // Normalize spaces
+            .trim();
+          
+          // Only populate if this ticket type is in our limited set
+          if (sortedTicketNames.includes(cleanName)) {
+            row[`${cleanName}${soldSuffix}`] = ticketType.sold;
+            row[`${cleanName}${availableSuffix}`] = ticketType.available;
+          }
+        }
+
+        rows.push(row);
+        
+        log('info', `Created consolidated row for event ${event.eventId}`, {
+          eventId: event.eventId,
+          ticketTypesInEvent: event.ticketTypes.length,
+          totalColumns: Object.keys(row).length
+        });
       }
 
-      await this.updateSheet('Ticket Types', headers, rows, accessToken);
+      // Write to Master sheet starting at A1
+      await this.updateSheetRange(settings.getMasterFullRange(), headers, rows, accessToken);
       
-      log('info', `Updated Ticket Types sheet with ${rows.length} ticket types`);
+      log('info', `Updated consolidated Master sheet`, {
+        eventsCount: events.length,
+        uniqueTicketTypes: sortedTicketNames.length,
+        totalColumns: headers.length
+      });
     } catch (error) {
-      log('error', 'Failed to update Ticket Types sheet', {
+      log('error', 'Failed to update Master sheet', {
         error: (error as Error).message
       });
       throw error;
     }
   }
 
-  async updateSalesDateChangesSheet(changes: SalesDateChange[]): Promise<void> {
-    try {
-      const accessToken = await this.getAccessToken();
-      
-      const headers = [
-        'Event ID', 'Event Name', 'Region', 'Change Type', 'Field',
-        'Previous Value', 'New Value', 'Changed At', 'Source', 'Severity'
-      ];
-
-      const rows: SheetRow[] = changes.map(change => {
-        const formatDate = (dateStr: string | null) => {
-          return dateStr ? new Date(dateStr).toLocaleString() : 'Not set';
-        };
-
-        const getSeverity = (change: SalesDateChange) => {
-          if (change.changeType === 'sellStart') {
-            if (change.previousValue && change.newValue && 
-                new Date(change.newValue) > new Date(change.previousValue)) {
-              return 'CRITICAL - Sales Delayed';
-            }
-            if (change.previousValue && change.newValue && 
-                new Date(change.newValue) < new Date(change.previousValue)) {
-              return 'HIGH - Sales Moved Earlier';
-            }
-            return 'MEDIUM - Sales Date Changed';
-          }
-          return 'LOW - Other Change';
-        };
-
-        return {
-          'Event ID': change.eventId,
-          'Event Name': change.eventName,
-          'Region': change.region,
-          'Change Type': change.changeType,
-          'Field': change.field,
-          'Previous Value': formatDate(change.previousValue),
-          'New Value': formatDate(change.newValue),
-          'Changed At': new Date(change.changedAt).toLocaleString(),
-          'Source': change.source.toUpperCase(),
-          'Severity': getSeverity(change)
-        };
-      });
-
-      // Use append mode for changes sheet to maintain history
-      await this.appendToSheet('Sales Date Changes', headers, rows, accessToken);
-      
-      log('info', `Appended ${rows.length} sales date changes to sheet`);
-    } catch (error) {
-      log('error', 'Failed to update Sales Date Changes sheet', {
-        error: (error as Error).message
-      });
-      throw error;
-    }
-  }
+  // Obsolete functions removed:
+  // - updateTicketTypesSheet() -> replaced by updateMasterSheet()
+  // - updateSalesDateChangesSheet() -> sales date tracking moved outside Google Sheets
 
   private async updateSheet(
     sheetName: string, 
@@ -260,18 +311,38 @@ export class GoogleSheetsClient {
     rows: SheetRow[], 
     accessToken: string
   ): Promise<void> {
+    log('info', `Updating sheet ${sheetName}`, {
+      sheetName,
+      headersCount: headers.length,
+      rowsCount: rows.length,
+      sheetId: this.sheetId
+    });
+
     // Clear the sheet first
-    await fetchWithRetry(
-      `https://sheets.googleapis.com/v4/spreadsheets/${this.sheetId}/values/${sheetName}:clear`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({})
-      }
-    );
+    const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${this.sheetId}/values/${sheetName}:clear`;
+    log('info', `Clearing sheet: ${clearUrl}`);
+    
+    const clearResponse = await fetchWithRetry(clearUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({})
+    });
+
+    if (!clearResponse.ok) {
+      const clearError = await clearResponse.text();
+      log('error', `Failed to clear sheet ${sheetName}`, {
+        status: clearResponse.status,
+        statusText: clearResponse.statusText,
+        error: clearError,
+        url: clearUrl
+      });
+      throw new Error(`Failed to clear sheet ${sheetName}: HTTP ${clearResponse.status} ${clearResponse.statusText}. ${clearError}`);
+    }
+
+    log('info', `Successfully cleared sheet ${sheetName}`);
 
     // Prepare data for batch update
     const values = [
@@ -280,19 +351,174 @@ export class GoogleSheetsClient {
     ];
 
     // Update with new data
-    await fetchWithRetry(
-      `https://sheets.googleapis.com/v4/spreadsheets/${this.sheetId}/values/${sheetName}?valueInputOption=USER_ENTERED`,
-      {
+    const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${this.sheetId}/values/${sheetName}?valueInputOption=USER_ENTERED`;
+    log('info', `Updating sheet with data: ${updateUrl}`, {
+      valuesCount: values.length,
+      firstRowSample: values[0]?.slice(0, 3) // Show first 3 columns of header
+    });
+
+    const updateResponse = await fetchWithRetry(updateUrl, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        values
+      })
+    });
+
+    if (!updateResponse.ok) {
+      const updateError = await updateResponse.text();
+      log('error', `Failed to update sheet ${sheetName}`, {
+        status: updateResponse.status,
+        statusText: updateResponse.statusText,
+        error: updateError,
+        url: updateUrl
+      });
+      throw new Error(`Failed to update sheet ${sheetName}: HTTP ${updateResponse.status} ${updateResponse.statusText}. ${updateError}`);
+    }
+
+    log('info', `Successfully updated sheet ${sheetName}`);
+  }
+
+  private async updateSheetRange(
+    range: string, 
+    headers: string[], 
+    rows: SheetRow[], 
+    accessToken: string
+  ): Promise<void> {
+    log('info', `Updating sheet range ${range}`, {
+      range,
+      headersCount: headers.length,
+      rowsCount: rows.length
+    });
+
+    // Prepare data for batch update (headers + rows)
+    const values = [
+      headers,
+      ...rows.map(row => headers.map(header => row[header] || ''))
+    ];
+
+    // Update with new data at specific range
+    const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${this.sheetId}/values/${range}?valueInputOption=USER_ENTERED`;
+    log('info', `Updating sheet range with data: ${updateUrl}`, {
+      valuesCount: values.length,
+      firstRowSample: values[0]?.slice(0, 3) // Show first 3 columns of header
+    });
+
+    const updateResponse = await fetchWithRetry(updateUrl, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        values
+      })
+    });
+
+    if (!updateResponse.ok) {
+      const updateError = await updateResponse.text();
+      log('error', `Failed to update sheet range ${range}`, {
+        status: updateResponse.status,
+        statusText: updateResponse.statusText,
+        error: updateError,
+        url: updateUrl
+      });
+      throw new Error(`Failed to update sheet range ${range}: HTTP ${updateResponse.status} ${updateResponse.statusText}. ${updateError}`);
+    }
+
+    log('info', `Successfully updated sheet range ${range}`);
+  }
+
+  // Removed appendToSheetRange - no longer needed with consolidated approach
+
+  async testCrossTabWrite(): Promise<void> {
+    try {
+      log('info', 'Testing simple cross-tabulated write');
+      
+      const accessToken = await this.getAccessToken();
+      log('info', 'Got access token for cross-tab test');
+      
+      // Simple static test data
+      const headers = ['Event ID', 'Ticket A Sold', 'Ticket A Available', 'Ticket B Sold', 'Ticket B Available'];
+      const rows = [{
+        'Event ID': 'test123',
+        'Ticket A Sold': 10,
+        'Ticket A Available': 90,
+        'Ticket B Sold': 5,
+        'Ticket B Available': 95
+      }];
+
+      log('info', 'Test headers and rows created', {
+        headers,
+        rows
+      });
+
+      // Write to a safe range using settings
+      const testRange = settings.getFullSheetRange(settings.getTicketTypesSheetName(), 'A20');
+      await this.updateSheetRange(testRange, headers, rows, accessToken);
+      
+      log('info', 'Cross-tab test write successful!');
+
+    } catch (error) {
+      log('error', 'Cross-tab test write failed', {
+        error: (error as Error).message,
+        stack: (error as Error).stack
+      });
+      throw error;
+    }
+  }
+
+  async testBasicWrite(): Promise<void> {
+    try {
+      log('info', 'Starting basic write test to Sheet1 A1');
+      
+      const accessToken = await this.getAccessToken();
+      log('info', 'Got access token for basic write test');
+      
+      // Simple write to Master sheet A1  
+      const testRange = settings.getFullSheetRange(settings.getEventsSheetName(), 'A1');
+      const testUrl = `https://sheets.googleapis.com/v4/spreadsheets/${this.sheetId}/values/${testRange}?valueInputOption=USER_ENTERED`;
+      log('info', `Testing basic write to: ${testUrl}`);
+      
+      const response = await fetchWithRetry(testUrl, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          values
+          values: [["Hello World"]]
         })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        log('error', 'Basic write test failed', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText,
+          url: testUrl
+        });
+        throw new Error(`Basic write failed: HTTP ${response.status} ${response.statusText}. ${errorText}`);
       }
-    );
+
+      const result: any = await response.json();
+      log('info', 'Basic write test successful', {
+        result: result,
+        updatedCells: result.updatedCells,
+        updatedRows: result.updatedRows
+      });
+
+    } catch (error) {
+      log('error', 'Basic write test failed', {
+        error: (error as Error).message,
+        stack: (error as Error).stack
+      });
+      throw error;
+    }
   }
 
   private async appendToSheet(
@@ -315,7 +541,7 @@ export class GoogleSheetsClient {
         }
       );
 
-      const existingData = await existingDataResponse.json();
+      const existingData: any = await existingDataResponse.json();
       const hasHeaders = existingData.values && existingData.values.length > 0;
 
       // Prepare data to append

@@ -10,6 +10,7 @@ import { fetchWithRetry } from '../utils/retry';
 import { RateLimiter } from '../utils/rate-limiter';
 import { log } from './validation';
 import { EventTracker } from './tracking';
+import { DebugLogger } from '../utils/debug-logger';
 
 const BASE_URLS = {
   PROD: 'https://vivenu.com/api',
@@ -34,6 +35,7 @@ export class VivenuClient {
   public readonly region: string;
   private rateLimiter: RateLimiter;
   private eventTracker: EventTracker;
+  private debugLogger: DebugLogger;
 
   constructor(region: string, apiKey: string, baseUrl: 'PROD' | 'DEV', kv: KVNamespace | null) {
     this.region = region;
@@ -41,6 +43,7 @@ export class VivenuClient {
     this.apiKey = apiKey;
     this.rateLimiter = new RateLimiter(kv, 100, 60); // 100 requests per minute
     this.eventTracker = new EventTracker(kv);
+    this.debugLogger = new DebugLogger(kv);
   }
 
   private getHeaders(): HeadersInit {
@@ -76,6 +79,11 @@ export class VivenuClient {
           skip,
           total: data.total
         });
+
+        // Debug log the first batch of events
+        if (skip === 0) {
+          await this.debugLogger.logApiCall(`/events?top=${batchSize}&skip=0`, this.region, events, 'events_first_batch');
+        }
 
         if (events.length === 0 || allEvents.length >= data.total) {
           break;
@@ -115,71 +123,64 @@ export class VivenuClient {
     try {
       await this.rateLimiter.waitIfNeeded(this.region);
       
+      log('info', `Getting simplified ticket metrics for event ${eventId}`, {
+        region: this.region,
+        eventId
+      });
+      
       // Get event with ticket types
       const event = await this.getEvent(eventId);
+      await this.debugLogger.logApiCall(`/events/${eventId}`, this.region, event, 'event_details');
       
-      // Calculate metrics with precise ticket type sales data
       const ticketTypes = event.tickets || [];
       const totalCapacity = ticketTypes.reduce((sum, t) => sum + (t.amount || 0), 0);
       
-      // Get precise ticket type metrics
-      const ticketTypeMetrics: TicketTypeMetrics[] = [];
-      let totalSold = 0;
+      log('info', `Event has ${ticketTypes.length} ticket types, total capacity: ${totalCapacity}`, {
+        region: this.region,
+        eventId,
+        ticketTypesCount: ticketTypes.length,
+        totalCapacity
+      });
+
+      // SIMPLIFIED: Just get the total sold count with a lightweight API call
+      await this.rateLimiter.waitIfNeeded(this.region);
+      const totalTicketsUrl = `${this.baseUrl}/tickets?event=${eventId}&top=1`; // Just get 1 ticket + total count
       
+      log('info', `Getting total ticket count: ${totalTicketsUrl}`, {
+        region: this.region,
+        eventId
+      });
+
+      const totalTicketsResponse = await fetchWithRetry(totalTicketsUrl, {
+        headers: this.getHeaders()
+      });
+
+      const totalTicketsData: VivenuListResponse<VivenuTicket> = await totalTicketsResponse.json();
+      const totalSold = totalTicketsData.total || 0;
+
+      log('info', `Got total sold count: ${totalSold}`, {
+        region: this.region,
+        eventId,
+        totalSold
+      });
+
+      // Debug log the response
+      await this.debugLogger.logApiCall(totalTicketsUrl, this.region, {
+        total: totalSold,
+        sampleTicket: totalTicketsData.rows?.[0] || null
+      }, 'total_tickets_count');
+
+      // Build simplified ticket type metrics (capacity only, no individual sold counts)
+      const ticketTypeMetrics: TicketTypeMetrics[] = [];
       for (const ticketType of ticketTypes) {
-        await this.rateLimiter.waitIfNeeded(this.region);
-        
-        try {
-          // Query tickets sold for this specific ticket type
-          const ticketTypeUrl = `${this.baseUrl}/tickets?event=${eventId}&ticketType=${ticketType._id}&top=1`;
-          const ticketTypeResponse = await fetchWithRetry(ticketTypeUrl, {
-            headers: this.getHeaders()
-          });
-          
-          const ticketTypeData: VivenuListResponse<VivenuTicket> = await ticketTypeResponse.json();
-          const ticketTypeSold = ticketTypeData.total || 0;
-          
-          totalSold += ticketTypeSold;
-          
-          ticketTypeMetrics.push({
-            id: ticketType._id,
-            name: ticketType.name,
-            price: ticketType.price,
-            capacity: ticketType.amount,
-            sold: ticketTypeSold,
-            available: Math.max(0, ticketType.amount - ticketTypeSold)
-          });
-          
-          log('info', `Ticket type sales data`, {
-            region: this.region,
-            eventId,
-            ticketType: ticketType.name,
-            sold: ticketTypeSold,
-            capacity: ticketType.amount
-          });
-          
-          // Small delay between ticket type queries
-          await new Promise(resolve => setTimeout(resolve, 100));
-          
-        } catch (error) {
-          log('warn', `Failed to get sales for ticket type ${ticketType._id}`, {
-            region: this.region,
-            eventId,
-            ticketTypeId: ticketType._id,
-            ticketTypeName: ticketType.name,
-            error: (error as Error).message
-          });
-          
-          // Fallback to including ticket type with unknown sales
-          ticketTypeMetrics.push({
-            id: ticketType._id,
-            name: ticketType.name,
-            price: ticketType.price,
-            capacity: ticketType.amount,
-            sold: 0, // Unknown, so we set to 0
-            available: ticketType.amount // Assume all available
-          });
-        }
+        ticketTypeMetrics.push({
+          id: ticketType._id,
+          name: ticketType.name,
+          price: ticketType.price,
+          capacity: ticketType.amount,
+          sold: 0, // We don't break down by ticket type anymore
+          available: ticketType.amount // Show full capacity as available
+        });
       }
       
       const totalAvailable = Math.max(0, totalCapacity - totalSold);
@@ -188,7 +189,7 @@ export class VivenuClient {
       // Track sales date changes
       await this.eventTracker.trackEvent(event, this.region, 'polling');
 
-      return {
+      const metrics = {
         eventId: event._id,
         eventName: event.name,
         eventDate: event.start,
@@ -202,12 +203,27 @@ export class VivenuClient {
         ticketTypes: ticketTypeMetrics,
         lastUpdated: new Date().toISOString()
       };
+
+      // Debug log the final metrics
+      await this.debugLogger.logProcessedMetrics(this.region, [metrics]);
+
+      log('info', `Successfully calculated simplified ticket metrics`, {
+        region: this.region,
+        eventId,
+        totalCapacity,
+        totalSold,
+        percentSold: metrics.percentSold,
+        ticketTypesCount: ticketTypeMetrics.length
+      });
+
+      return metrics;
       
     } catch (error) {
       log('error', `Failed to get ticket metrics for event ${eventId}`, {
         region: this.region,
         eventId,
-        error: (error as Error).message
+        error: (error as Error).message,
+        stack: (error as Error).stack
       });
       return null;
     }

@@ -1,0 +1,31 @@
+{
+  "googleSheets": {
+    "masterSheet": "Master",
+    "range": "A1",
+    "options": {
+      "clearBeforeUpdate": true,
+      "maxTicketTypes": 10,
+      "headerFormat": {
+        "soldSuffix": " Sold",
+        "availableSuffix": " Available"
+      }
+    }
+  },
+  "vivenu": {
+    "api": {
+      "timeout": 30000,
+      "retryAttempts": 3,
+      "batchSize": 100
+    },
+    "filtering": {
+      "eventNameFilters": ["hyrox", "race"],
+      "maxEventsPerRegion": 1,
+      "testMode": true
+    }
+  },
+  "debugging": {
+    "enableDetailedLogging": true,
+    "logApiResponses": true,
+    "maxLogRetention": "24h"
+  }
+}

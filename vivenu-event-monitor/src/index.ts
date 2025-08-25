@@ -2,6 +2,8 @@ import { Env } from './types/env';
 import { handleEventUpdatedWebhook } from './handlers/webhook';
 import { handleScheduledPoll, performEventPoll } from './handlers/scheduled';
 import { EventTracker } from './services/tracking';
+import { GoogleSheetsClient } from './services/sheets';
+import { createVivenuClients } from './services/vivenu';
 import { log } from './services/validation';
 
 export default {
@@ -10,8 +12,6 @@ export default {
 		
 		try {
 			switch (url.pathname) {
-				case '/webhook/event-updated':
-					return await handleEventUpdatedWebhook(request, env);
 				
 				case '/health':
 					return await handleHealthCheck(env);
@@ -21,6 +21,12 @@ export default {
 				
 				case '/poll/manual':
 					return await handleManualPoll(request, env);
+				
+				case '/test/google-auth':
+					return await handleGoogleAuthTest(env);
+				
+				case '/test/ticket-data':
+					return await handleTicketDataTest(env);
 				
 				default:
 					return new Response('Not Found', { status: 404 });
@@ -67,47 +73,19 @@ async function handleHealthCheck(env: Env): Promise<Response> {
 			},
 			status: 200
 		});
+
 	} catch (error) {
-		return new Response(JSON.stringify({
-			status: 'unhealthy',
-			error: (error as Error).message,
-			timestamp: new Date().toISOString()
-		}), {
-			headers: { 'Content-Type': 'application/json' },
-			status: 500
-		});
+		return new Response('Health check failed', { status: 500 });
 	}
 }
 
 async function handleStatus(env: Env): Promise<Response> {
 	try {
-		const lastPollData = env.KV ? await env.KV.get('last_poll_summary') : null;
-		const recentWebhooks = env.KV ? await getRecentWebhookStats(env.KV) : null;
-		
-		// Get recent sales date changes
-		let recentChanges = null;
-		if (env.KV) {
-			const eventTracker = new EventTracker(env.KV);
-			const changes = await eventTracker.getRecentChanges(10);
-			recentChanges = changes.map(c => ({
-				eventName: c.eventName,
-				region: c.region,
-				changeType: c.changeType,
-				previousValue: c.previousValue,
-				newValue: c.newValue,
-				changedAt: c.changedAt,
-				source: c.source
-			}));
-		}
-		
 		const statusData = {
 			status: 'operational',
 			timestamp: new Date().toISOString(),
-			environment: env.ENVIRONMENT || 'unknown',
-			lastPoll: lastPollData ? JSON.parse(lastPollData) : null,
-			recentWebhooks,
-			recentSalesDateChanges: recentChanges,
-			version: '1.0.0'
+			kv: await getKvStatus(env.KV),
+			webhooks: await getWebhookStats(env.KV)
 		};
 
 		return new Response(JSON.stringify(statusData, null, 2), {
@@ -117,23 +95,52 @@ async function handleStatus(env: Env): Promise<Response> {
 			},
 			status: 200
 		});
+
 	} catch (error) {
-		return new Response(JSON.stringify({
-			status: 'error',
+		log('error', 'Status handler failed', {
 			error: (error as Error).message,
-			timestamp: new Date().toISOString()
-		}), {
-			headers: { 'Content-Type': 'application/json' },
-			status: 500
+			stack: (error as Error).stack
 		});
+
+		return new Response('Status check failed', { status: 500 });
 	}
 }
 
-async function getRecentWebhookStats(kv: KVNamespace): Promise<any> {
+async function getKvStatus(kv: KVNamespace | null): Promise<any> {
+	if (!kv) {
+		return { status: 'not_configured' };
+	}
+
 	try {
-		const list = await kv.list({ prefix: 'event_update:' });
+		// Test KV by setting and getting a test key
+		const testKey = `test_${Date.now()}`;
+		await kv.put(testKey, 'test', { expirationTtl: 60 });
+		const result = await kv.get(testKey);
+		await kv.delete(testKey);
+
+		return {
+			status: result === 'test' ? 'healthy' : 'error',
+			readable: true,
+			writable: true
+		};
+	} catch (error) {
+		return {
+			status: 'error',
+			error: (error as Error).message
+		};
+	}
+}
+
+async function getWebhookStats(kv: KVNamespace | null): Promise<any> {
+	if (!kv) {
+		return { status: 'not_configured' };
+	}
+
+	try {
+		// List recent webhook keys
+		const list = await kv.list({ prefix: 'webhook:event-updated:', limit: 10 });
 		const recentCount = list.keys.length;
-		
+
 		return {
 			recentEventUpdates: recentCount,
 			lastUpdate: list.keys.length > 0 ? list.keys[0].name : null
@@ -206,6 +213,143 @@ async function handleManualPoll(request: Request, env: Env): Promise<Response> {
 			error: (error as Error).message,
 			endpoint: '/poll/manual',
 			triggeredBy: 'manual'
+		}), {
+			headers: { 'Content-Type': 'application/json' },
+			status: 500
+		});
+	}
+}
+
+async function handleGoogleAuthTest(env: Env): Promise<Response> {
+	try {
+		log('info', 'Starting Google Auth test');
+		
+		const sheetsClient = new GoogleSheetsClient(env);
+		
+		// Test authentication only - don't try to access sheets
+		const testResult: any = {
+			timestamp: new Date().toISOString(),
+			endpoint: '/test/google-auth',
+			status: 'testing'
+		};
+		
+		try {
+			// Test cross-tabulated write format
+			await sheetsClient.testCrossTabWrite();
+			
+			testResult.status = 'success';
+			testResult.message = 'Google Sheets authentication and cross-tab write successful';
+			
+			log('info', 'Google Auth and write test completed successfully');
+			
+		} catch (error) {
+			testResult.status = 'failed';
+			testResult.error = (error as Error).message;
+			testResult.message = 'Google Sheets authentication failed';
+			
+			log('error', 'Google Auth test failed', {
+				error: (error as Error).message,
+				stack: (error as Error).stack
+			});
+		}
+		
+		const httpStatus = testResult.status === 'success' ? 200 : 500;
+		
+		return new Response(JSON.stringify(testResult, null, 2), {
+			headers: {
+				'Content-Type': 'application/json',
+				'Cache-Control': 'no-cache'
+			},
+			status: httpStatus
+		});
+		
+	} catch (error) {
+		log('error', 'Google Auth test handler failed', {
+			error: (error as Error).message,
+			stack: (error as Error).stack
+		});
+		
+		return new Response(JSON.stringify({
+			status: 'failed',
+			timestamp: new Date().toISOString(),
+			message: 'Google Auth test handler failed',
+			error: (error as Error).message,
+			endpoint: '/test/google-auth'
+		}), {
+			headers: { 'Content-Type': 'application/json' },
+			status: 500
+		});
+	}
+}
+
+async function handleTicketDataTest(env: Env): Promise<Response> {
+	try {
+		log('info', 'Starting ticket data test');
+		
+		// Get one DACH event to examine ticket types
+		const clients = createVivenuClients(env);
+		const dachClient = clients.find(client => client.region === 'DACH');
+		
+		if (!dachClient) {
+			throw new Error('DACH client not found');
+		}
+		
+		const events = await dachClient.getAllEvents();
+		const hyroxEvents = events.filter(event => 
+			event.name.toLowerCase().includes('hyrox') ||
+			event.name.toLowerCase().includes('race')
+		);
+		
+		if (hyroxEvents.length === 0) {
+			throw new Error('No HYROX events found');
+		}
+		
+		// Get metrics for the first event
+		const firstEvent = hyroxEvents[0];
+		const metrics = await dachClient.getTicketMetrics(firstEvent._id);
+		
+		if (!metrics) {
+			throw new Error('Failed to get ticket metrics');
+		}
+		
+		// Show the ticket types data structure
+		const testResult = {
+			timestamp: new Date().toISOString(),
+			endpoint: '/test/ticket-data',
+			eventId: metrics.eventId,
+			eventName: metrics.eventName,
+			ticketTypes: metrics.ticketTypes,
+			ticketTypeNames: metrics.ticketTypes.map(t => t.name),
+			sampleCrossTabHeaders: ['Event ID'],
+			status: 'success'
+		};
+		
+		// Generate what the cross-tab headers would look like
+		for (const ticketType of metrics.ticketTypes) {
+			testResult.sampleCrossTabHeaders.push(`${ticketType.name} - Sold`);
+			testResult.sampleCrossTabHeaders.push(`${ticketType.name} - Available`);
+		}
+		
+		return new Response(JSON.stringify(testResult, null, 2), {
+			headers: {
+				'Content-Type': 'application/json',
+				'Cache-Control': 'no-cache'
+			},
+			status: 200
+		});
+		
+	} catch (error) {
+		log('error', 'Ticket data test failed', {
+			error: (error as Error).message,
+			stack: (error as Error).stack
+		});
+		
+		return new Response(JSON.stringify({
+			status: 'failed',
+			timestamp: new Date().toISOString(),
+			message: 'Ticket data test failed',
+			error: (error as Error).message,
+			endpoint: '/test/ticket-data'
 		}), {
 			headers: { 'Content-Type': 'application/json' },
 			status: 500

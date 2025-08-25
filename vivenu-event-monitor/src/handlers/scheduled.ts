@@ -134,16 +134,10 @@ export async function performEventPoll(env: Env, source: 'scheduled' | 'manual' 
         log('info', `Updating Google Sheets with ${allEventMetrics.length} events`);
         
         const sheetsClient = new GoogleSheetsClient(env);
-        await sheetsClient.updateEventsSheet(allEventMetrics);
-        await sheetsClient.updateTicketTypesSheet(allEventMetrics);
+        log('info', 'Updating consolidated Master sheet with all event data');
+        await sheetsClient.updateMasterSheet(allEventMetrics);
         
-        // Update sales date changes sheet with recent changes
-        const eventTracker = new EventTracker(env.KV || null);
-        const recentChanges = await eventTracker.getRecentChanges(100);
-        if (recentChanges.length > 0) {
-          await sheetsClient.updateSalesDateChangesSheet(recentChanges);
-          log('info', `Updated Sales Date Changes sheet with ${recentChanges.length} changes`);
-        }
+        // Sales date tracking moved outside Google Sheets - could be handled by webhooks/JSON files
         
         // Cache the last successful poll
         if (env.KV) {
