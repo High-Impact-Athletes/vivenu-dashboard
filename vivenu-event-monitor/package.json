@@ -9,8 +9,8 @@
 		"dev:dashboard": "wrangler dev --env development && echo 'Dashboard available at http://localhost:8787/dashboard'",
 		"start": "wrangler dev",
 		"test": "vitest --run",
-		"test:availability": "python ../test_availability.py --all",
-		"test:dashboard": "python ../test_availability.py",
+		"test:availability": "python ./scripts/python/test_availability.py --all",
+		"test:dashboard": "python ./scripts/python/test_availability.py",
 		"test:frankfurt": "node test_frankfurt_charity.js",
 		"deploy:staging": "wrangler deploy --env staging",
 		"cf-typegen": "wrangler types"

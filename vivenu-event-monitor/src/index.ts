@@ -1,5 +1,4 @@
 import { Env } from './types/env';
-import { handleEventUpdatedWebhook } from './handlers/webhook';
 import { handleScheduled } from './handlers/scheduled';
 import { handleAvailabilityRequest } from './handlers/availability';
 import { EventTracker } from './services/tracking';
@@ -71,7 +70,7 @@ export default {
 async function handleHealthCheck(env: Env): Promise<Response> {
 	try {
 		const healthData = {
-			status: 'healthy',
+			status: 'ok',
 			timestamp: new Date().toISOString(),
 			environment: env.ENVIRONMENT,
 			version: '1.0.0'

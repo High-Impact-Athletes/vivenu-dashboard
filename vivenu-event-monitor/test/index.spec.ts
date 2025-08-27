@@ -1,4 +1,4 @@
-import { env, createExecutionContext, waitOnExecutionContext, SELF } from 'cloudflare:test';
+import { env, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { describe, it, expect } from 'vitest';
 import worker from '../src';
 
@@ -13,11 +13,5 @@ describe('Worker skeleton', () => {
 		expect(json.status).toBe('ok');
 	});
 
-	it('POST /webhook/event-updated returns 200 (integration)', async () => {
-		const request = new Request('http://example.com/webhook/event-updated', { method: 'POST', body: '{}' });
-		const response = await SELF.fetch(request);
-		expect(response.status).toBe(200);
-		const json = await response.json();
-		expect(json.ok).toBe(true);
-	});
+	// Webhook route removed as no longer needed
 });

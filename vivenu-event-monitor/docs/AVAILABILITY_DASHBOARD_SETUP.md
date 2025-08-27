@@ -83,8 +83,8 @@ This starts the worker locally at `http://localhost:8787`
 
 #### Test the Endpoints
 ```bash
-# Run the availability test script
-python test_availability.py
+# Run the availability test script via npm
+npm run test:dashboard
 
 # Or manually test endpoints:
 curl http://localhost:8787/health
@@ -251,7 +251,7 @@ curl http://localhost:8787/api/dashboard/data | jq .
 ### Adding New Endpoints
 1. Add routes to `src/handlers/availability.ts`
 2. Update routing in `src/index.ts`
-3. Add tests to `test_availability.py`
+3. Add tests to `scripts/python/test_availability.py`
 
 ### Custom Alert System
 The foundation is in place for alerts when events near sold-out status. See `AvailabilityAlert` type for structure.
