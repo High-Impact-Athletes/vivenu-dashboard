@@ -27,6 +27,10 @@ export default {
 				
 				case '/test/ticket-data':
 					return await handleTicketDataTest(env);
+
+				case '/api/dashboard/export-to-sheets':
+					// Delegate to availability handler routing
+					return await handleAvailabilityRequest(request, env, ctx);
 				
 				default:
 					// Check for availability routes

@@ -1,4 +1,6 @@
 import { AvailabilityService } from '../services/availability';
+import { GoogleSheetsClient } from '../services/sheets';
+import { EventMetrics } from '../types/vivenu';
 import { Env } from '../types/env';
 import { REGIONS } from '../services/vivenu';
 import { log } from '../services/validation';
@@ -17,9 +19,14 @@ export async function handleAvailabilityRequest(
   // /api/availability/{eventId}/{ticketTypeId}
   // /api/availability/{eventId}/shop/{shopId}
   // /api/dashboard/data
+  // /api/dashboard/export-to-sheets
   
   if (pathParts[1] === 'dashboard' && pathParts[2] === 'data') {
     return handleDashboardData(request, env, ctx);
+  }
+
+  if (pathParts[1] === 'dashboard' && pathParts[2] === 'export-to-sheets') {
+    return handleDashboardExport(request, env, ctx);
   }
   
   if (pathParts[1] !== 'availability' || pathParts.length < 3) {
@@ -241,6 +248,74 @@ async function handleDashboardData(
       error: 'Failed to get dashboard data',
       message: (error as Error).message
     }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+async function handleDashboardExport(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<Response> {
+  try {
+    // Reuse the same data-building logic
+    const dataResponse = await handleDashboardData(request, env, ctx);
+    if (!dataResponse.ok) {
+      return dataResponse;
+    }
+
+    const dashboardData = await dataResponse.json();
+    const events = dashboardData.events as Array<{
+      eventId: string;
+      eventName: string;
+      eventDate: string;
+      region: string;
+      ticketTypes: Array<{ name: string; capacity: number; sold: number; available: number }>;
+      totals: { capacity: number; sold: number; available: number; percentSold: number };
+      lastUpdated: string;
+    }>;
+
+    // Map to EventMetrics for Sheets client
+    const metrics: EventMetrics[] = events.map(ev => ({
+      eventId: ev.eventId,
+      eventName: ev.eventName,
+      eventDate: ev.eventDate,
+      salesStartDate: undefined,
+      region: ev.region,
+      status: undefined,
+      totalCapacity: ev.totals.capacity,
+      totalSold: ev.totals.sold,
+      totalAvailable: ev.totals.available,
+      percentSold: Math.round(ev.totals.percentSold * 100) / 100,
+      ticketTypes: ev.ticketTypes.map(t => ({
+        id: t.name,
+        name: t.name,
+        price: 0,
+        capacity: t.capacity,
+        sold: t.sold,
+        available: t.available,
+      })),
+      lastUpdated: ev.lastUpdated
+    }));
+
+    const sheets = new GoogleSheetsClient(env);
+    await sheets.updateMasterSheet(metrics);
+
+    return new Response(JSON.stringify({
+      status: 'success',
+      message: 'Dashboard exported to Google Sheets',
+      eventsExported: metrics.length,
+      timestamp: new Date().toISOString()
+    }, null, 2), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({
+      status: 'failed',
+      error: (error as Error).message
+    }, null, 2), {
       status: 500,
       headers: { 'Content-Type': 'application/json' }
     });
