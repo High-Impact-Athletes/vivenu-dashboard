@@ -1,0 +1,474 @@
+{
+  "ticket_types": [
+    {
+      "id": "67bd977570a5de11c8e0566b",
+      "name": "HYROX MEN | Thursday",
+      "capacity": 1584,
+      "sold": 1341,
+      "available": 243,
+      "percent_sold": 84.66,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e0566c",
+      "name": "HYROX PRO MEN | Thursday",
+      "capacity": 92,
+      "sold": 131,
+      "available": 0,
+      "percent_sold": 142.39,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e05675",
+      "name": "Spectators 23rd of October 2025",
+      "capacity": 4000,
+      "sold": 771,
+      "available": 3229,
+      "percent_sold": 19.28,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e05678",
+      "name": "Spectators 24th of October 2025",
+      "capacity": 4000,
+      "sold": 1154,
+      "available": 2846,
+      "percent_sold": 28.85,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e05679",
+      "name": "Spectators 25th of October 2025",
+      "capacity": 4000,
+      "sold": 1274,
+      "available": 2726,
+      "percent_sold": 31.85,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e0567a",
+      "name": "HYROX PRO DOUBLES WOMEN | Thursday",
+      "capacity": 105,
+      "sold": 91,
+      "available": 14,
+      "percent_sold": 86.67,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e0567c",
+      "name": "HYROX DOUBLES MIXED | Saturday",
+      "capacity": 720,
+      "sold": 782,
+      "available": 0,
+      "percent_sold": 108.61,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e0567d",
+      "name": "HYROX PRO MEN | Saturday",
+      "capacity": 132,
+      "sold": 93,
+      "available": 39,
+      "percent_sold": 70.45,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e0567e",
+      "name": "HYROX PRO DOUBLES MEN | Saturday",
+      "capacity": 90,
+      "sold": 169,
+      "available": 0,
+      "percent_sold": 187.78,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e0567f",
+      "name": "Spectators 26th of October 2025",
+      "capacity": 4000,
+      "sold": 1361,
+      "available": 2639,
+      "percent_sold": 34.02,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e05680",
+      "name": "HYROX ADAPTIVE MEN | Thursday",
+      "capacity": 10,
+      "sold": 18,
+      "available": 0,
+      "percent_sold": 180.0,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e05681",
+      "name": "HYROX WOMEN | Friday",
+      "capacity": 792,
+      "sold": 624,
+      "available": 168,
+      "percent_sold": 78.79,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e05682",
+      "name": "HYROX PRO DOUBLES MEN | Thursday",
+      "capacity": 105,
+      "sold": 129,
+      "available": 0,
+      "percent_sold": 122.86,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e05683",
+      "name": "HYROX PRO WOMEN | Thursday",
+      "capacity": 92,
+      "sold": 144,
+      "available": 0,
+      "percent_sold": 156.52,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e05684",
+      "name": "HYROX DOUBLES MIXED | Thursday",
+      "capacity": 805,
+      "sold": 658,
+      "available": 147,
+      "percent_sold": 81.74,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e05688",
+      "name": "HYROX MEN | Saturday",
+      "capacity": 1440,
+      "sold": 1670,
+      "available": 0,
+      "percent_sold": 115.97,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e0568e",
+      "name": "HYROX PRO DOUBLES WOMEN | Saturday",
+      "capacity": 90,
+      "sold": 116,
+      "available": 0,
+      "percent_sold": 128.89,
+      "is_secondary": false
+    },
+    {
+      "id": "67bd977570a5de11c8e0568f",
+      "name": "HYROX PRO WOMEN | Saturday",
+      "capacity": 132,
+      "sold": 94,
+      "available": 38,
+      "percent_sold": 71.21,
+      "is_secondary": false
+    },
+    {
+      "id": "67bdcb50395fba553630b659",
+      "name": "HYROX WOMEN | Sunday",
+      "capacity": 560,
+      "sold": 486,
+      "available": 74,
+      "percent_sold": 86.79,
+      "is_secondary": false
+    },
+    {
+      "id": "67bdcb50395fba553630b65b",
+      "name": "HYROX MEN RELAY | Sunday",
+      "capacity": 27,
+      "sold": 24,
+      "available": 3,
+      "percent_sold": 88.89,
+      "is_secondary": false
+    },
+    {
+      "id": "67bdcb50395fba553630b65c",
+      "name": "HYROX MIXED RELAY | Sunday",
+      "capacity": 32,
+      "sold": 25,
+      "available": 7,
+      "percent_sold": 78.12,
+      "is_secondary": false
+    },
+    {
+      "id": "67bdcb50395fba553630b65d",
+      "name": "HYROX DOUBLES WOMEN | Sunday",
+      "capacity": 650,
+      "sold": 610,
+      "available": 40,
+      "percent_sold": 93.85,
+      "is_secondary": false
+    },
+    {
+      "id": "67bdcb50395fba553630b65e",
+      "name": "HYROX WOMEN RELAY | Sunday",
+      "capacity": 27,
+      "sold": 24,
+      "available": 3,
+      "percent_sold": 88.89,
+      "is_secondary": false
+    },
+    {
+      "id": "67bdcb50395fba553630b65f",
+      "name": "HYROX DOUBLES MEN | Sunday",
+      "capacity": 825,
+      "sold": 774,
+      "available": 51,
+      "percent_sold": 93.82,
+      "is_secondary": false
+    },
+    {
+      "id": "67bdccf0c739994414632e5c",
+      "name": "Spectators 5 days Pass",
+      "capacity": 4000,
+      "sold": 36,
+      "available": 3964,
+      "percent_sold": 0.9,
+      "is_secondary": false
+    },
+    {
+      "id": "68110946644a8c4e09cfad65",
+      "name": "HYROX DOUBLES WOMEN | Friday",
+      "capacity": 910,
+      "sold": 820,
+      "available": 90,
+      "percent_sold": 90.11,
+      "is_secondary": false
+    },
+    {
+      "id": "68112fb7643e19e374472a41",
+      "name": "CHARITY | HYROX MEN",
+      "capacity": 100,
+      "sold": 105,
+      "available": 0,
+      "percent_sold": 105.0,
+      "is_secondary": false
+    },
+    {
+      "id": "68112fbf643e19e374472a42",
+      "name": "CHARITY | HYROX PRO DOUBLES WOMEN",
+      "capacity": 50,
+      "sold": 3,
+      "available": 47,
+      "percent_sold": 6.0,
+      "is_secondary": false
+    },
+    {
+      "id": "68112fc3643e19e374472a43",
+      "name": "CHARITY | HYROX DOUBLES MIXED",
+      "capacity": 50,
+      "sold": 58,
+      "available": 0,
+      "percent_sold": 116.0,
+      "is_secondary": false
+    },
+    {
+      "id": "68112fd5643e19e374472a44",
+      "name": "CHARITY | HYROX PRO DOUBLES MEN",
+      "capacity": 50,
+      "sold": 12,
+      "available": 38,
+      "percent_sold": 24.0,
+      "is_secondary": false
+    },
+    {
+      "id": "6811300c643e19e374472a45",
+      "name": "CHARITY | HYROX WOMEN",
+      "capacity": 100,
+      "sold": 51,
+      "available": 49,
+      "percent_sold": 51.0,
+      "is_secondary": false
+    },
+    {
+      "id": "68113016643e19e374472a47",
+      "name": "CHARITY | HYROX DOUBLES WOMEN ",
+      "capacity": 50,
+      "sold": 30,
+      "available": 20,
+      "percent_sold": 60.0,
+      "is_secondary": false
+    },
+    {
+      "id": "68113020643e19e374472a48",
+      "name": "CHARITY | HYROX DOUBLES MEN",
+      "capacity": 50,
+      "sold": 32,
+      "available": 18,
+      "percent_sold": 64.0,
+      "is_secondary": false
+    },
+    {
+      "id": "6821b2a704d5e5cca24425dc",
+      "name": "CHARITY | HYROX MEN RELAY ",
+      "capacity": 15,
+      "sold": 3,
+      "available": 12,
+      "percent_sold": 20.0,
+      "is_secondary": false
+    },
+    {
+      "id": "6821b2b704d5e5cca24425dd",
+      "name": "CHARITY | HYROX MIXED RELAY",
+      "capacity": 10,
+      "sold": 5,
+      "available": 5,
+      "percent_sold": 50.0,
+      "is_secondary": false
+    },
+    {
+      "id": "6821b2c604d5e5cca24425de",
+      "name": "CHARITY | HYROX WOMEN RELAY",
+      "capacity": 15,
+      "sold": 0,
+      "available": 15,
+      "percent_sold": 0.0,
+      "is_secondary": false
+    },
+    {
+      "id": "6821b7c298bb319b1c4a2035",
+      "name": "CHARITY | HYROX PRO WOMEN",
+      "capacity": 40,
+      "sold": 6,
+      "available": 34,
+      "percent_sold": 15.0,
+      "is_secondary": false
+    },
+    {
+      "id": "6821b7e098bb319b1c4a2036",
+      "name": "CHARITY | HYROX PRO MEN",
+      "capacity": 40,
+      "sold": 26,
+      "available": 14,
+      "percent_sold": 65.0,
+      "is_secondary": false
+    },
+    {
+      "id": "68225d53d40b103ae8487871",
+      "name": "HYROX ADAPTIVE WOMEN | Friday ",
+      "capacity": 10,
+      "sold": 24,
+      "available": 0,
+      "percent_sold": 240.0,
+      "is_secondary": false
+    },
+    {
+      "id": "68225dbbd40b103ae8487872",
+      "name": "HYROX DOUBLES MEN | Friday",
+      "capacity": 1015,
+      "sold": 878,
+      "available": 137,
+      "percent_sold": 86.5,
+      "is_secondary": false
+    },
+    {
+      "id": "683d94c9065afb3f9d6d628f",
+      "name": "HYROX WOMEN | Wednesday",
+      "capacity": 376,
+      "sold": 378,
+      "available": 0,
+      "percent_sold": 100.53,
+      "is_secondary": false
+    },
+    {
+      "id": "683d94c9065afb3f9d6d6290",
+      "name": "HYROX PRO MEN | Wednesday",
+      "capacity": 116,
+      "sold": 113,
+      "available": 3,
+      "percent_sold": 97.41,
+      "is_secondary": false
+    },
+    {
+      "id": "683d94c9065afb3f9d6d6291",
+      "name": "HYROX PRO DOUBLES WOMEN | Wednesday",
+      "capacity": 69,
+      "sold": 71,
+      "available": 0,
+      "percent_sold": 102.9,
+      "is_secondary": false
+    },
+    {
+      "id": "683d94c9065afb3f9d6d6293",
+      "name": "HYROX PRO DOUBLES MEN | Wednesday",
+      "capacity": 98,
+      "sold": 99,
+      "available": 0,
+      "percent_sold": 101.02,
+      "is_secondary": false
+    },
+    {
+      "id": "683d94c9065afb3f9d6d6294",
+      "name": "HYROX PRO WOMEN | Wednesday",
+      "capacity": 39,
+      "sold": 40,
+      "available": 0,
+      "percent_sold": 102.56,
+      "is_secondary": false
+    },
+    {
+      "id": "683d94c9065afb3f9d6d6295",
+      "name": "HYROX DOUBLES MIXED | Wednesday",
+      "capacity": 548,
+      "sold": 553,
+      "available": 0,
+      "percent_sold": 100.91,
+      "is_secondary": false
+    },
+    {
+      "id": "683d9653bc1e6f164e2a1072",
+      "name": "HYROX MEN | Wednesday",
+      "capacity": 674,
+      "sold": 677,
+      "available": 0,
+      "percent_sold": 100.45,
+      "is_secondary": false
+    },
+    {
+      "id": "683ebabe16cff72c1a92514b",
+      "name": "Spectators 22nd of October 2025",
+      "capacity": 4000,
+      "sold": 582,
+      "available": 3418,
+      "percent_sold": 14.55,
+      "is_secondary": false
+    },
+    {
+      "id": "683ff6fb3039a544f8b8f8fc",
+      "name": "HYROX DOUBLES WOMEN | Wednesday",
+      "capacity": 270,
+      "sold": 276,
+      "available": 0,
+      "percent_sold": 102.22,
+      "is_secondary": false
+    },
+    {
+      "id": "683ff7033039a544f8b8f8fd",
+      "name": "HYROX DOUBLES MEN | Wednesday",
+      "capacity": 305,
+      "sold": 309,
+      "available": 0,
+      "percent_sold": 101.31,
+      "is_secondary": false
+    }
+  ],
+  "totals": {
+    "capacity": 37310,
+    "sold": 17750,
+    "available": 19560,
+    "percent_sold": 47.57
+  },
+  "charity_validation": {
+    "id": "6821b7e098bb319b1c4a2036",
+    "name": "CHARITY | HYROX PRO MEN",
+    "capacity": 40,
+    "sold": 26,
+    "available": 14,
+    "percent_sold": 65.0,
+    "is_secondary": false
+  },
+  "scraping_stats": {
+    "total_tickets_scraped": 29192,
+    "api_calls": 31,
+    "elapsed_seconds": 99.56582
+  }
+}

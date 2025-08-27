@@ -673,6 +673,14 @@ async function serveDashboard(env: Env): Promise<Response> {
                                 \${event.totals.status.toUpperCase()}
                             </span>
                         </div>
+                        \${event.charityStats ? \`
+                            <div class="charity-stats" style="margin-top: 0.5rem; padding: 0.5rem; background: #f8f9fa; border-radius: 4px; border-left: 3px solid #e74c3c;">
+                                <small style="color: #e74c3c; font-weight: 600;">
+                                    🎁 Charity: \${event.charityStats.percentSold.toFixed(1)}% sold 
+                                    (\${event.charityStats.sold.toLocaleString()}/\${event.charityStats.capacity.toLocaleString()})
+                                </small>
+                            </div>
+                        \` : ''}
                     </div>
                     
                     <div class="ticket-types">

@@ -119,7 +119,7 @@ class EventSalesTest:
         """Comprehensively scrape ALL tickets with robust error handling"""
         all_tickets = []
         skip = 0
-        batch_size = 100
+        batch_size = 1000  # Maximum allowed by API
         min_batch_size = 10
         call_count = 0
         max_retries = 3
@@ -144,8 +144,8 @@ class EventSalesTest:
             params = {
                 "event": self.event_id,
                 "top": batch_size,
-                "skip": skip,
-                "status": "VALID,DETAILSREQUIRED"  # Only get valid tickets
+                "skip": skip
+                # Note: No status filter in params - API doesn't support it
             }
             
             print(f"\n📞 API Call #{call_count}: skip={skip}, batch_size={batch_size}")
@@ -193,7 +193,8 @@ class EventSalesTest:
                 raise Exception("Failed to fetch tickets after all retries")
             
             data = response.json()
-            tickets = data.get('data', [])
+            # Use 'rows' not 'data' - matching historical_sync.py
+            tickets = data.get('rows', [])
             total = data.get('total', 0)
             
             if not tickets:

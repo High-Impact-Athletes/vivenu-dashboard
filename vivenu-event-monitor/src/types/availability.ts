@@ -31,6 +31,12 @@ export interface EventAvailability {
     percentSold: number;
     status: 'available' | 'limited' | 'soldout';
   };
+  charityStats?: {
+    capacity: number;
+    sold: number;
+    available: number;
+    percentSold: number;
+  };
   shops?: ShopAvailability[];
   lastUpdated: string;
   cacheExpiry?: string;

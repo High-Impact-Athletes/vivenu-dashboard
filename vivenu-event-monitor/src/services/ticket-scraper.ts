@@ -56,8 +56,13 @@ export class TicketScraper {
     const secondaryIndicators = [
       'ATHLETE 2',
       'TEAM MEMBER',
+      'TEAM MEMBERS',
       'Sportograf Photo Package',
-      'Photo Package'
+      'Photo Package',
+      'Volunteering',
+      'ATHLETE2',
+      'ATHLETEN 2',
+      'SPECTATOR'
     ];
     
     return secondaryIndicators.some(indicator => 
@@ -82,11 +87,11 @@ export class TicketScraper {
    * Based on historical_sync.py:get_tickets_for_event()
    */
   async scrapeAllTickets(eventId: string): Promise<TicketScrapingResult> {
-    log(`🎫 Starting comprehensive ticket scraping for event ${eventId}`);
+    log('info', `🎫 Starting comprehensive ticket scraping for event ${eventId}`);
     
     const allTickets: ScrapedTicket[] = [];
     let skip = 0;
-    let initialBatchSize = 100;
+    let initialBatchSize = 1000;  // Maximum allowed by API for faster scraping
     let batchSize = initialBatchSize;
     const minBatchSize = 10;
     let callCount = 0;
@@ -107,7 +112,7 @@ export class TicketScraper {
         skip: skip.toString()
       });
 
-      log(`📞 API Call #${callCount}: skip=${skip}, batch_size=${batchSize}`);
+      log('info', `📞 API Call #${callCount}: skip=${skip}, batch_size=${batchSize}`);
 
       // Retry logic for 503 errors and other failures
       let success = false;
@@ -120,27 +125,26 @@ export class TicketScraper {
           
           const response = await fetchWithRetry(`${url}?${params}`, {
             method: 'GET',
-            headers,
-            timeout: 15000
+            headers
           });
 
           if (response.status === 503) {
             const delay = this.exponentialBackoff(attempt);
-            log(`⏳ 503 Service Unavailable (attempt ${attempt + 1}/${maxRetries})`);
+            log('warn', `⏳ 503 Service Unavailable (attempt ${attempt + 1}/${maxRetries})`);
             
             if (attempt < maxRetries - 1) {
-              log(`⏰ Waiting ${(delay / 1000).toFixed(1)}s before retry...`);
+              log('info', `⏰ Waiting ${(delay / 1000).toFixed(1)}s before retry...`);
               await new Promise(resolve => setTimeout(resolve, delay));
               
               // Reduce batch size on repeated 503s
               if (attempt > 0 && batchSize > minBatchSize) {
                 batchSize = Math.max(minBatchSize, Math.floor(batchSize / 2));
                 params.set('top', batchSize.toString());
-                log(`📉 Reducing batch size to ${batchSize}`);
+                log('info', `📉 Reducing batch size to ${batchSize}`);
               }
               continue;
             } else {
-              log(`❌ Failed after ${maxRetries} 503 attempts`);
+              log('error', `❌ Failed after ${maxRetries} 503 attempts`);
               break;
             }
           }
@@ -149,7 +153,7 @@ export class TicketScraper {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
           }
 
-          const data = await response.json();
+          const data = await response.json() as { rows: any[], total: number };
           tickets = data.rows || [];
           total = data.total || 0;
           
@@ -158,7 +162,7 @@ export class TicketScraper {
           // Set expected total on first successful call
           if (expectedTotal === null) {
             expectedTotal = total;
-            log(`🎯 Expected total tickets: ${expectedTotal.toLocaleString()}`);
+            log('info', `🎯 Expected total tickets: ${expectedTotal.toLocaleString()}`);
           }
 
           allTickets.push(...tickets.map(ticket => ({
@@ -175,39 +179,39 @@ export class TicketScraper {
 
           // Progress logging
           const progressPct = expectedTotal > 0 ? (allTickets.length / expectedTotal * 100) : 0;
-          log(`✅ Got ${tickets.length} tickets in ${elapsed}ms`);
-          log(`📊 Progress: ${allTickets.length.toLocaleString()}/${expectedTotal.toLocaleString()} (${progressPct.toFixed(1)}%)`);
+          log('info', `✅ Got ${tickets.length} tickets in ${elapsed}ms`);
+          log('info', `📊 Progress: ${allTickets.length.toLocaleString()}/${expectedTotal.toLocaleString()} (${progressPct.toFixed(1)}%)`);
 
           success = true;
           break;
 
         } catch (error) {
           const delay = this.exponentialBackoff(attempt);
-          log(`🔄 Request error (attempt ${attempt + 1}/${maxRetries}): ${error}`);
+          log('warn', `🔄 Request error (attempt ${attempt + 1}/${maxRetries}): ${error}`);
           
           if (attempt < maxRetries - 1) {
-            log(`⏰ Waiting ${(delay / 1000).toFixed(1)}s before retry...`);
+            log('info', `⏰ Waiting ${(delay / 1000).toFixed(1)}s before retry...`);
             await new Promise(resolve => setTimeout(resolve, delay));
             continue;
           } else {
-            log(`❌ Failed after ${maxRetries} attempts: ${error}`);
+            log('error', `❌ Failed after ${maxRetries} attempts: ${error}`);
             break;
           }
         }
       }
 
       if (!success) {
-        log(`❌ Batch failed at skip=${skip}`);
-        log(`📊 Successfully fetched ${allTickets.length} tickets before failure`);
+        log('error', `❌ Batch failed at skip=${skip}`);
+        log('info', `📊 Successfully fetched ${allTickets.length} tickets before failure`);
         break;
       }
 
       // Check completion conditions
       if (tickets.length === 0) {
-        log(`🏁 No more tickets returned - stopping`);
+        log('info', `🏁 No more tickets returned - stopping`);
         break;
       } else if (expectedTotal && allTickets.length >= expectedTotal) {
-        log(`🏁 Got all expected tickets (${allTickets.length.toLocaleString()}) - stopping`);
+        log('info', `🏁 Got all expected tickets (${allTickets.length.toLocaleString()}) - stopping`);
         break;
       }
 
@@ -220,14 +224,14 @@ export class TicketScraper {
     // Calculate completion rate
     const completionRate = expectedTotal ? (allTickets.length / expectedTotal * 100) : 0;
 
-    log(`\n📥 SCRAPING COMPLETE!`);
-    log(`   Total tickets fetched: ${allTickets.length.toLocaleString()}`);
-    log(`   Expected tickets: ${(expectedTotal || 0).toLocaleString()}`);
-    log(`   Completion rate: ${completionRate.toFixed(1)}%`);
-    log(`   API calls made: ${callCount}`);
+    log('info', `\n📥 SCRAPING COMPLETE!`);
+    log('info', `   Total tickets fetched: ${allTickets.length.toLocaleString()}`);
+    log('info', `   Expected tickets: ${(expectedTotal || 0).toLocaleString()}`);
+    log('info', `   Completion rate: ${completionRate.toFixed(1)}%`);
+    log('info', `   API calls made: ${callCount}`);
 
     if (completionRate < 95) {
-      log(`   ⚠️  WARNING: Only got ${completionRate.toFixed(1)}% of expected tickets!`);
+      log('warn', `   ⚠️  WARNING: Only got ${completionRate.toFixed(1)}% of expected tickets!`);
     }
 
     return {

@@ -321,6 +321,33 @@ export class AvailabilityService {
     const totalAvailable = Math.max(0, totalCapacity - totalSold);
     const totalPercentSold = totalCapacity > 0 ? (totalSold / totalCapacity) * 100 : 0;
     
+    // Calculate charity ticket statistics
+    const charityTicketTypes = primaryTicketTypes.filter(ticketType => 
+      ticketType.name.toUpperCase().includes('CHARITY')
+    );
+    
+    let charityStats: { capacity: number; sold: number; available: number; percentSold: number } | undefined;
+    
+    if (charityTicketTypes.length > 0) {
+      let charityCapacity = 0;
+      let charitySold = 0;
+      
+      for (const charityType of charityTicketTypes) {
+        charityCapacity += charityType.amount || 0;
+        charitySold += this.ticketScraper.getSoldCountForTicketType(scrapingResult, charityType.name);
+      }
+      
+      const charityAvailable = Math.max(0, charityCapacity - charitySold);
+      const charityPercentSold = charityCapacity > 0 ? (charitySold / charityCapacity) * 100 : 0;
+      
+      charityStats = {
+        capacity: charityCapacity,
+        sold: charitySold,
+        available: charityAvailable,
+        percentSold: Math.round(charityPercentSold * 100) / 100
+      };
+    }
+    
     // Get shop breakdown if requested
     let shops: ShopAvailability[] | undefined;
     if (includeShops && event.underShops) {
@@ -349,6 +376,7 @@ export class AvailabilityService {
         percentSold: Math.round(totalPercentSold * 100) / 100,
         status: this.determineStatus(totalPercentSold)
       },
+      charityStats,
       shops,
       lastUpdated: new Date().toISOString()
     };
