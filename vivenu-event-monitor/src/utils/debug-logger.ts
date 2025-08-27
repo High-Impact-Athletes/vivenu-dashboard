@@ -1,57 +1,90 @@
-import { log } from '../services/validation';
-
 export class DebugLogger {
   private kv: KVNamespace | null;
-  private sessionId: string;
 
   constructor(kv: KVNamespace | null) {
     this.kv = kv;
-    this.sessionId = new Date().toISOString().replace(/[:.]/g, '-');
   }
 
-  async logApiCall(endpoint: string, region: string, data: any, filename?: string): Promise<void> {
+  private getDebugKey(suffix: string): string {
+    return `debug:${suffix}:${Date.now()}`;
+  }
+
+  async logApiCall(
+    endpoint: string,
+    region: string,
+    data: any,
+    suffix: string
+  ): Promise<void> {
     if (!this.kv) {
-      log('warn', 'Debug logging skipped - no KV available');
+      console.log(`[DEBUG] ${region} ${endpoint} - ${suffix}`, data);
       return;
     }
 
-    const timestamp = new Date().toISOString();
-    const logKey = `debug:${this.sessionId}:${filename || endpoint.replace(/[/\?&=]/g, '_')}:${region}`;
-    
-    const logData = {
-      timestamp,
-      sessionId: this.sessionId,
-      endpoint,
-      region,
-      dataType: Array.isArray(data) ? 'array' : typeof data,
-      dataLength: Array.isArray(data) ? data.length : 1,
-      data
-    };
-
     try {
-      await this.kv.put(logKey, JSON.stringify(logData, null, 2), {
-        expirationTtl: 24 * 60 * 60 // Keep debug logs for 24 hours
-      });
-
-      log('info', `Debug logged API call: ${endpoint}`, {
-        region,
-        logKey,
-        dataLength: logData.dataLength
-      });
-    } catch (error) {
-      log('error', 'Failed to save debug log', {
+      const debugData = {
         endpoint,
         region,
-        error: (error as Error).message
+        data,
+        timestamp: new Date().toISOString()
+      };
+
+      const key = this.getDebugKey(`${region}_${suffix}`);
+      await this.kv.put(key, JSON.stringify(debugData), {
+        expirationTtl: 3600 // 1 hour
       });
+
+      console.log(`[DEBUG] Logged to KV: ${key}`);
+    } catch (error) {
+      console.warn('Debug logger KV error:', error);
     }
   }
 
   async logProcessedMetrics(region: string, metrics: any[]): Promise<void> {
-    await this.logApiCall('processed-metrics', region, metrics, 'final_metrics');
+    if (!this.kv) {
+      console.log(`[DEBUG] ${region} processed metrics:`, metrics);
+      return;
+    }
+
+    try {
+      const debugData = {
+        region,
+        metrics,
+        timestamp: new Date().toISOString()
+      };
+
+      const key = this.getDebugKey(`${region}_metrics`);
+      await this.kv.put(key, JSON.stringify(debugData), {
+        expirationTtl: 3600 // 1 hour
+      });
+
+      console.log(`[DEBUG] Logged metrics to KV: ${key}`);
+    } catch (error) {
+      console.warn('Debug logger KV error:', error);
+    }
   }
 
-  getSessionId(): string {
-    return this.sessionId;
+  async getRecentLogs(region?: string, limit: number = 10): Promise<any[]> {
+    if (!this.kv) {
+      return [];
+    }
+
+    try {
+      const prefix = region ? `debug:${region}_` : 'debug:';
+      const list = await this.kv.list({ prefix, limit });
+
+      const logs = await Promise.all(
+        list.keys.map(async (key) => {
+          const data = await this.kv!.get(key.name, 'json');
+          return { key: key.name, ...data };
+        })
+      );
+
+      return logs.sort((a, b) => 
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+    } catch (error) {
+      console.warn('Failed to get debug logs:', error);
+      return [];
+    }
   }
 }

@@ -1,53 +1,87 @@
-import { WebhookValidationResult } from '../types/webhook';
+type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
-export async function validateWebhookSignature(
-  payload: string,
-  signature: string | null,
-  secret: string
-): Promise<WebhookValidationResult> {
-  if (!signature) {
-    return { isValid: false, error: 'Missing signature header' };
-  }
+interface LogContext {
+  [key: string]: any;
+}
 
-  try {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(payload);
-    
-    const key = await crypto.subtle.importKey(
-      'raw',
-      encoder.encode(secret),
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign']
-    );
-    
-    const signatureBuffer = await crypto.subtle.sign('HMAC', key, data);
-    const computedSignature = Array.from(new Uint8Array(signatureBuffer))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-    
-    // Remove any prefix from the signature (like "sha256=")
-    const cleanSignature = signature.replace(/^(sha256=|hmac-sha256=)/, '');
-    
-    const isValid = computedSignature === cleanSignature;
-    
-    return { 
-      isValid,
-      error: isValid ? undefined : 'Invalid signature'
-    };
-  } catch (error) {
-    return { 
-      isValid: false, 
-      error: `Signature validation error: ${(error as Error).message}` 
-    };
+export function log(level: LogLevel, message: string, context?: LogContext): void {
+  const timestamp = new Date().toISOString();
+  const contextStr = context ? JSON.stringify(context) : '';
+  
+  const logEntry = {
+    timestamp,
+    level: level.toUpperCase(),
+    message,
+    ...(context && { context })
+  };
+  
+  // Use appropriate console method
+  switch (level) {
+    case 'debug':
+      console.debug(`[${timestamp}] DEBUG: ${message}`, contextStr);
+      break;
+    case 'info':
+      console.log(`[${timestamp}] INFO: ${message}`, contextStr);
+      break;
+    case 'warn':
+      console.warn(`[${timestamp}] WARN: ${message}`, contextStr);
+      break;
+    case 'error':
+      console.error(`[${timestamp}] ERROR: ${message}`, contextStr);
+      break;
+    default:
+      console.log(`[${timestamp}] ${level.toUpperCase()}: ${message}`, contextStr);
   }
 }
 
-export function log(level: 'info' | 'warn' | 'error', message: string, data: Record<string, any> = {}) {
-  console.log(JSON.stringify({
-    timestamp: new Date().toISOString(),
-    level,
-    message,
-    ...data
-  }));
+export function validateEventData(event: any): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  
+  if (!event) {
+    errors.push('Event is null or undefined');
+    return { valid: false, errors };
+  }
+  
+  if (!event._id) {
+    errors.push('Event is missing _id');
+  }
+  
+  if (!event.name) {
+    errors.push('Event is missing name');
+  }
+  
+  if (!event.start) {
+    errors.push('Event is missing start date');
+  }
+  
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+
+export function validateTicketData(ticket: any): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  
+  if (!ticket) {
+    errors.push('Ticket is null or undefined');
+    return { valid: false, errors };
+  }
+  
+  if (!ticket._id) {
+    errors.push('Ticket is missing _id');
+  }
+  
+  if (!ticket.eventId) {
+    errors.push('Ticket is missing eventId');
+  }
+  
+  if (!ticket.ticketTypeId) {
+    errors.push('Ticket is missing ticketTypeId');
+  }
+  
+  return {
+    valid: errors.length === 0,
+    errors
+  };
 }

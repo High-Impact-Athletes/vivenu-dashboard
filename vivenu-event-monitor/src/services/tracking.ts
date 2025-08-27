@@ -1,3 +1,22 @@
+export class EventTracker {
+  constructor(kv: KVNamespace | null) {}
+
+  async trackEvent(event: any, region: string, source: 'webhook' | 'polling'): Promise<any[]> {
+    return [];
+  }
+
+  async createSalesDateAlert(change: any): Promise<void> {
+    return;
+  }
+
+  async getRecentChanges(limit: number = 50): Promise<any[]> {
+    return [];
+  }
+
+  async getEventHistory(eventId: string): Promise<any | null> {
+    return null;
+  }
+}
 import { EventHistory, SalesDateChange, SalesAlert } from '../types/tracking';
 import { VivenuEvent } from '../types/vivenu';
 import { log } from './validation';
