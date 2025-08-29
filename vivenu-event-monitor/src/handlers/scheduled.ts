@@ -6,22 +6,23 @@ export async function handleScheduled(controller: ScheduledController, env: Env,
   console.log(JSON.stringify({ level: 'info', message: 'Scheduled trigger executed', scheduledTime: when }));
 
   try {
-    // Trigger export to Google Sheets using new analytics-friendly dashboard format
-    const request = new Request('http://internal/api/dashboard/export-to-sheets?format=dashboard', { method: 'POST' });
+    // Trigger auto-discovery export to Google Sheets - finds all HYROX events with charity tickets
+    const request = new Request('http://internal/api/dashboard/export-to-sheets?source=vivenu&format=dashboard', { method: 'POST' });
     const response = await handleAvailabilityRequest(request, env, ctx);
 
     const text = await response.text();
     console.log(JSON.stringify({ 
       level: 'info', 
-      message: 'Scheduled dashboard export response', 
+      message: 'Scheduled auto-discovery export response', 
       status: response.status, 
+      source: 'vivenu',
       format: 'dashboard',
       body: text 
     }));
   } catch (error) {
     console.log(JSON.stringify({ 
       level: 'error', 
-      message: 'Scheduled dashboard export failed', 
+      message: 'Scheduled auto-discovery export failed', 
       error: (error as Error).message 
     }));
   }

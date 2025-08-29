@@ -1,8 +1,9 @@
 import { AvailabilityService } from '../services/availability';
 import { GoogleSheetsClient } from '../services/sheets';
 import { EventMetrics } from '../types/vivenu';
+import { EventAvailability } from '../types/availability';
 import { Env } from '../types/env';
-import { REGIONS } from '../services/vivenu';
+import { REGIONS, createVivenuClients } from '../services/vivenu';
 import { log } from '../services/validation';
 
 export async function handleAvailabilityRequest(
@@ -274,14 +275,144 @@ async function handleDashboardExport(
     // Get data based on source
     let dashboardData;
     if (source === 'vivenu') {
-      // TODO: Implement direct Vivenu API fetching
-      return new Response(JSON.stringify({
-        status: 'failed',
-        error: 'Direct Vivenu API source not yet implemented'
-      }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
+      // Direct Vivenu API auto-discovery - find all events with charity tickets
+      log('info', 'Starting auto-discovery of events with charity tickets');
+      
+      const clients = createVivenuClients(env);
+      if (clients.length === 0) {
+        return new Response(JSON.stringify({
+          status: 'failed',
+          error: 'No Vivenu API clients available - check API key configuration'
+        }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Find all events with charity tickets across all regions
+      const allEventsPromises = clients.map(async (client) => {
+        try {
+          const charityEvents = await client.findEventsWithCharityTickets();
+          return charityEvents.map(event => ({ event, client }));
+        } catch (error) {
+          log('error', `Failed to get charity events from ${client.region}`, {
+            region: client.region,
+            error: (error as Error).message
+          });
+          return [];
+        }
       });
+
+      const eventsByRegion = await Promise.all(allEventsPromises);
+      const allCharityEvents = eventsByRegion.flat();
+
+      if (allCharityEvents.length === 0) {
+        log('warn', 'No HYROX events with charity tickets found in any region');
+        dashboardData = {
+          events: [],
+          summary: {
+            totalEvents: 0,
+            totalCapacity: 0,
+            totalSold: 0,
+            totalAvailable: 0,
+            avgPercentSold: 0,
+            eventsNearSoldOut: 0,
+            eventsSoldOut: 0
+          },
+          lastRefresh: new Date().toISOString()
+        };
+      } else {
+        // Convert to EventAvailability format for the dashboard
+        const eventsPromises = allCharityEvents.map(async ({ event, client }) => {
+          try {
+            const metrics = await client.getTicketMetrics(event._id);
+            if (!metrics) return null;
+
+            // Convert EventMetrics to EventAvailability format
+            const availability: EventAvailability = {
+              eventId: metrics.eventId,
+              eventName: metrics.eventName,
+              eventDate: metrics.eventDate,
+              region: metrics.region,
+              ticketTypes: metrics.ticketTypes.map(tt => ({
+                id: tt.id,
+                name: tt.name,
+                capacity: tt.capacity,
+                sold: tt.sold,
+                available: tt.available,
+                percentSold: tt.capacity > 0 ? (tt.sold / tt.capacity) * 100 : 0,
+                status: tt.capacity > 0 ? 
+                  (tt.available === 0 ? 'soldout' : 
+                   tt.available < tt.capacity * 0.1 ? 'limited' : 'available') : 'soldout',
+                price: tt.price
+              })),
+              totals: {
+                capacity: metrics.totalCapacity,
+                sold: metrics.totalSold,
+                available: metrics.totalAvailable,
+                percentSold: metrics.percentSold,
+                status: metrics.totalAvailable === 0 ? 'soldout' : 
+                        metrics.totalAvailable < metrics.totalCapacity * 0.1 ? 'limited' : 'available'
+              },
+              lastUpdated: metrics.lastUpdated
+            };
+
+            return availability;
+          } catch (error) {
+            log('error', `Failed to get metrics for ${event.name}`, {
+              eventId: event._id,
+              region: client.region,
+              error: (error as Error).message
+            });
+            return null;
+          }
+        });
+
+        const events = (await Promise.all(eventsPromises)).filter(e => e !== null) as EventAvailability[];
+
+        // Calculate summary
+        let totalCapacity = 0;
+        let totalSold = 0;
+        let totalAvailable = 0;
+        let eventsSoldOut = 0;
+        let eventsNearSoldOut = 0;
+
+        for (const event of events) {
+          totalCapacity += event.totals.capacity;
+          totalSold += event.totals.sold;
+          totalAvailable += event.totals.available;
+          
+          if (event.totals.status === 'soldout') {
+            eventsSoldOut++;
+          } else if (event.totals.status === 'limited') {
+            eventsNearSoldOut++;
+          }
+        }
+
+        const avgPercentSold = totalCapacity > 0 ? (totalSold / totalCapacity) * 100 : 0;
+
+        dashboardData = {
+          events,
+          summary: {
+            totalEvents: events.length,
+            totalCapacity,
+            totalSold,
+            totalAvailable,
+            avgPercentSold: Math.round(avgPercentSold * 100) / 100,
+            eventsNearSoldOut,
+            eventsSoldOut
+          },
+          lastRefresh: new Date().toISOString()
+        };
+
+        log('info', 'Auto-discovery completed', {
+          totalEventsFound: allCharityEvents.length,
+          eventsWithMetrics: events.length,
+          totalCapacity,
+          totalSold,
+          regions: [...new Set(events.map(e => e.region))]
+        });
+      }
     } else {
       // Use existing dashboard data logic
       const dataResponse = await handleDashboardData(request, env, ctx);
