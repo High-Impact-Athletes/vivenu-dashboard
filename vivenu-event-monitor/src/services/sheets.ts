@@ -1,4 +1,5 @@
 import { EventMetrics, TicketTypeMetrics } from '../types/vivenu';
+import { EventAvailability } from '../types/availability';
 import { SalesDateChange } from '../types/tracking';
 import { Env } from '../types/env';
 import { fetchWithRetry } from '../utils/retry';
@@ -298,6 +299,186 @@ export class GoogleSheetsClient {
         error: (error as Error).message
       });
       throw error;
+    }
+  }
+
+  async updateDashboardSheet(events: EventAvailability[]): Promise<void> {
+    try {
+      const accessToken = await this.getAccessToken();
+      
+      log('info', 'Creating analytics-friendly dashboard sheet', {
+        eventsCount: events.length
+      });
+
+      // Analytics-friendly headers (long format)
+      const headers = [
+        'Timestamp',
+        'Event ID',
+        'Event Name', 
+        'Event Date',
+        'Region',
+        'Ticket Type Name',
+        'Ticket Type ID',
+        'Price',
+        'Capacity',
+        'Sold',
+        'Available',
+        'Percent Sold',
+        'Status',
+        'Is Charity',
+        'Last Updated'
+      ];
+
+      const rows: SheetRow[] = [];
+      const timestamp = new Date().toISOString();
+      
+      for (const event of events) {
+        // Add event total row
+        rows.push({
+          'Timestamp': timestamp,
+          'Event ID': event.eventId,
+          'Event Name': event.eventName,
+          'Event Date': new Date(event.eventDate).toLocaleDateString(),
+          'Region': event.region,
+          'Ticket Type Name': 'TOTAL',
+          'Ticket Type ID': 'TOTAL',
+          'Price': 0,
+          'Capacity': event.totals.capacity,
+          'Sold': event.totals.sold,
+          'Available': event.totals.available,
+          'Percent Sold': event.totals.percentSold,
+          'Status': event.totals.status,
+          'Is Charity': false,
+          'Last Updated': new Date(event.lastUpdated).toLocaleString()
+        });
+
+        // Add each ticket type as a separate row
+        for (const ticketType of event.ticketTypes) {
+          const isCharity = ticketType.name.toLowerCase().includes('charity') || 
+                           ticketType.name.toLowerCase().includes('donation');
+          
+          rows.push({
+            'Timestamp': timestamp,
+            'Event ID': event.eventId,
+            'Event Name': event.eventName,
+            'Event Date': new Date(event.eventDate).toLocaleDateString(),
+            'Region': event.region,
+            'Ticket Type Name': ticketType.name,
+            'Ticket Type ID': ticketType.id,
+            'Price': ticketType.price || 0,
+            'Capacity': ticketType.capacity,
+            'Sold': ticketType.sold,
+            'Available': ticketType.available,
+            'Percent Sold': ticketType.percentSold,
+            'Status': ticketType.status,
+            'Is Charity': isCharity,
+            'Last Updated': new Date(event.lastUpdated).toLocaleString()
+          });
+        }
+
+        // Add charity stats if available
+        if (event.charityStats) {
+          rows.push({
+            'Timestamp': timestamp,
+            'Event ID': event.eventId,
+            'Event Name': event.eventName,
+            'Event Date': new Date(event.eventDate).toLocaleDateString(),
+            'Region': event.region,
+            'Ticket Type Name': 'CHARITY_TOTAL',
+            'Ticket Type ID': 'CHARITY_TOTAL',
+            'Price': 0,
+            'Capacity': event.charityStats.capacity,
+            'Sold': event.charityStats.sold,
+            'Available': event.charityStats.available,
+            'Percent Sold': event.charityStats.percentSold,
+            'Status': event.charityStats.percentSold >= 95 ? 'soldout' : event.charityStats.percentSold >= 80 ? 'limited' : 'available',
+            'Is Charity': true,
+            'Last Updated': new Date(event.lastUpdated).toLocaleString()
+          });
+        }
+        
+        log('info', `Created dashboard rows for event ${event.eventId}`, {
+          eventId: event.eventId,
+          ticketTypesCount: event.ticketTypes.length,
+          totalRows: event.ticketTypes.length + (event.charityStats ? 2 : 1)
+        });
+      }
+
+      // Choose append or replace based on settings
+      if (settings.isDashboardAppendMode()) {
+        await this.appendToDashboardSheet(settings.getDashboardSheetName(), headers, rows, accessToken);
+      } else {
+        await this.updateSheetRange(settings.getDashboardFullRange(), headers, rows, accessToken);
+      }
+      
+      log('info', `Updated analytics dashboard sheet`, {
+        eventsCount: events.length,
+        totalRows: rows.length,
+        appendMode: settings.isDashboardAppendMode()
+      });
+    } catch (error) {
+      log('error', 'Failed to update Dashboard sheet', {
+        error: (error as Error).message
+      });
+      throw error;
+    }
+  }
+
+  private async appendToDashboardSheet(
+    sheetName: string,
+    headers: string[],
+    rows: SheetRow[],
+    accessToken: string
+  ): Promise<void> {
+    if (rows.length === 0) return;
+
+    try {
+      // Check if sheet exists and has headers
+      const existingDataResponse = await fetchWithRetry(
+        `https://sheets.googleapis.com/v4/spreadsheets/${this.sheetId}/values/${sheetName}!A1:Z1`,
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      const existingData: any = await existingDataResponse.json();
+      const hasHeaders = existingData.values && existingData.values.length > 0;
+
+      // Prepare data to append
+      const values = hasHeaders 
+        ? rows.map(row => headers.map(header => row[header] || ''))
+        : [headers, ...rows.map(row => headers.map(header => row[header] || ''))];
+
+      // Append new data
+      const appendResponse = await fetchWithRetry(
+        `https://sheets.googleapis.com/v4/spreadsheets/${this.sheetId}/values/${sheetName}:append?valueInputOption=USER_ENTERED`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            values
+          })
+        }
+      );
+
+      if (!appendResponse.ok) {
+        const errorText = await appendResponse.text();
+        throw new Error(`Failed to append to dashboard sheet: ${errorText}`);
+      }
+
+      log('info', `Successfully appended ${values.length} rows to dashboard sheet`);
+    } catch (error) {
+      log('warn', `Failed to append to dashboard sheet ${sheetName}, trying full update instead`, {
+        error: (error as Error).message
+      });
+      // Fallback to full update if append fails
+      await this.updateSheetRange(settings.getDashboardFullRange(), headers, rows, accessToken);
     }
   }
 

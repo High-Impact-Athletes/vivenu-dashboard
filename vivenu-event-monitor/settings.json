@@ -1,6 +1,7 @@
 {
   "googleSheets": {
     "masterSheet": "Master",
+    "dashboardSheet": "Dashboard",
     "range": "A1",
     "options": {
       "clearBeforeUpdate": true,
@@ -8,6 +9,11 @@
       "headerFormat": {
         "soldSuffix": " Sold",
         "availableSuffix": " Available"
+      },
+      "dashboard": {
+        "appendMode": true,
+        "includeTimestamp": true,
+        "maxRows": 10000
       }
     }
   },

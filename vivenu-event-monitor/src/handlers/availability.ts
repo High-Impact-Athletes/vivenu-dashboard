@@ -260,57 +260,91 @@ async function handleDashboardExport(
   ctx: ExecutionContext
 ): Promise<Response> {
   try {
-    // Reuse the same data-building logic
-    const dataResponse = await handleDashboardData(request, env, ctx);
-    if (!dataResponse.ok) {
-      return dataResponse;
+    const url = new URL(request.url);
+    const format = url.searchParams.get('format') || 'dashboard'; // 'dashboard' (new analytics format) or 'wide' (legacy cross-tab)
+    const source = url.searchParams.get('source') || 'dashboard'; // 'dashboard' or 'vivenu'
+    const clear = url.searchParams.get('clear') === 'true';
+
+    log('info', 'Dashboard export requested', {
+      format,
+      source,
+      clear
+    });
+
+    // Get data based on source
+    let dashboardData;
+    if (source === 'vivenu') {
+      // TODO: Implement direct Vivenu API fetching
+      return new Response(JSON.stringify({
+        status: 'failed',
+        error: 'Direct Vivenu API source not yet implemented'
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } else {
+      // Use existing dashboard data logic
+      const dataResponse = await handleDashboardData(request, env, ctx);
+      if (!dataResponse.ok) {
+        return dataResponse;
+      }
+      dashboardData = await dataResponse.json();
     }
 
-    const dashboardData = await dataResponse.json();
-    const events = dashboardData.events as Array<{
-      eventId: string;
-      eventName: string;
-      eventDate: string;
-      region: string;
-      ticketTypes: Array<{ name: string; capacity: number; sold: number; available: number }>;
-      totals: { capacity: number; sold: number; available: number; percentSold: number };
-      lastUpdated: string;
-    }>;
-
-    // Map to EventMetrics for Sheets client
-    const metrics: EventMetrics[] = events.map(ev => ({
-      eventId: ev.eventId,
-      eventName: ev.eventName,
-      eventDate: ev.eventDate,
-      salesStartDate: undefined,
-      region: ev.region,
-      status: undefined,
-      totalCapacity: ev.totals.capacity,
-      totalSold: ev.totals.sold,
-      totalAvailable: ev.totals.available,
-      percentSold: Math.round(ev.totals.percentSold * 100) / 100,
-      ticketTypes: ev.ticketTypes.map(t => ({
-        id: t.name,
-        name: t.name,
-        price: 0,
-        capacity: t.capacity,
-        sold: t.sold,
-        available: t.available,
-      })),
-      lastUpdated: ev.lastUpdated
-    }));
-
+    const events = dashboardData.events;
     const sheets = new GoogleSheetsClient(env);
-    await sheets.updateMasterSheet(metrics);
 
-    return new Response(JSON.stringify({
-      status: 'success',
-      message: 'Dashboard exported to Google Sheets',
-      eventsExported: metrics.length,
-      timestamp: new Date().toISOString()
-    }, null, 2), {
-      headers: { 'Content-Type': 'application/json' }
-    });
+    if (format === 'dashboard') {
+      // New analytics-friendly format
+      await sheets.updateDashboardSheet(events);
+      
+      return new Response(JSON.stringify({
+        status: 'success',
+        message: 'Dashboard exported to Google Sheets (Analytics format)',
+        format: 'dashboard',
+        eventsExported: events.length,
+        totalRows: events.reduce((sum, event) => 
+          sum + event.ticketTypes.length + 1 + (event.charityStats ? 1 : 0), 0),
+        timestamp: new Date().toISOString()
+      }, null, 2), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } else {
+      // Legacy cross-tabulated format
+      const metrics: EventMetrics[] = events.map(ev => ({
+        eventId: ev.eventId,
+        eventName: ev.eventName,
+        eventDate: ev.eventDate,
+        salesStartDate: undefined,
+        region: ev.region,
+        status: undefined,
+        totalCapacity: ev.totals.capacity,
+        totalSold: ev.totals.sold,
+        totalAvailable: ev.totals.available,
+        percentSold: Math.round(ev.totals.percentSold * 100) / 100,
+        ticketTypes: ev.ticketTypes.map(t => ({
+          id: t.name,
+          name: t.name,
+          price: 0,
+          capacity: t.capacity,
+          sold: t.sold,
+          available: t.available,
+        })),
+        lastUpdated: ev.lastUpdated
+      }));
+
+      await sheets.updateMasterSheet(metrics);
+
+      return new Response(JSON.stringify({
+        status: 'success',
+        message: 'Dashboard exported to Google Sheets (Cross-tab format)',
+        format: 'wide',
+        eventsExported: metrics.length,
+        timestamp: new Date().toISOString()
+      }, null, 2), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
   } catch (error) {
     return new Response(JSON.stringify({
       status: 'failed',

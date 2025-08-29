@@ -3,6 +3,7 @@ import settingsJson from '../../settings.json';
 // TypeScript interfaces for settings
 export interface GoogleSheetsSettings {
   masterSheet: string;
+  dashboardSheet: string;
   range: string;
   options: {
     clearBeforeUpdate: boolean;
@@ -10,6 +11,11 @@ export interface GoogleSheetsSettings {
     headerFormat: {
       soldSuffix: string;
       availableSuffix: string;
+    };
+    dashboard: {
+      appendMode: boolean;
+      includeTimestamp: boolean;
+      maxRows: number;
     };
   };
 }
@@ -88,6 +94,10 @@ class SettingsService {
     return this.settings.googleSheets.masterSheet;
   }
 
+  getDashboardSheetName(): string {
+    return this.settings.googleSheets.dashboardSheet;
+  }
+
   getMasterRange(): string {
     return this.settings.googleSheets.range;
   }
@@ -106,6 +116,23 @@ class SettingsService {
 
   getAvailableSuffix(): string {
     return this.settings.googleSheets.options.headerFormat.availableSuffix;
+  }
+
+  // Dashboard settings
+  isDashboardAppendMode(): boolean {
+    return this.settings.googleSheets.options.dashboard.appendMode;
+  }
+
+  shouldIncludeTimestamp(): boolean {
+    return this.settings.googleSheets.options.dashboard.includeTimestamp;
+  }
+
+  getDashboardMaxRows(): number {
+    return this.settings.googleSheets.options.dashboard.maxRows;
+  }
+
+  getDashboardFullRange(): string {
+    return this.getFullSheetRange(this.getDashboardSheetName(), this.getMasterRange());
   }
 
   // Legacy method names for compatibility
