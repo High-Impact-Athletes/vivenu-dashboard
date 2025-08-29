@@ -10,9 +10,9 @@ binding = "KV"
 id = "d40c6ee183574f0193a600ecfe00ecfc"
 preview_id = "caf7d381c9144efeaf6a1ce29b197ab3"
 
-# Scheduled cron trigger - runs daily at 2 AM UTC
+# Scheduled cron trigger - runs daily at 4 AM UTC
 [triggers]
-crons = ["0 2 * * *"]
+crons = ["0 4 * * *"]
 
 # Environment variables (non-sensitive)
 [vars]
