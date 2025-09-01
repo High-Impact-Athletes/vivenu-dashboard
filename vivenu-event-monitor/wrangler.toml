@@ -16,7 +16,7 @@ crons = ["0 4 * * *"]
 
 # Environment variables (non-sensitive)
 [vars]
-GOOGLE_SHEET_ID = "YOUR_GOOGLE_SHEET_ID"
+GOOGLE_SHEET_ID = "10dAtPhwPw3raEfSAbtCzMprVjCOHOctI-I1CASJeWFk"
 ENVIRONMENT = "production"
 
 # Observability

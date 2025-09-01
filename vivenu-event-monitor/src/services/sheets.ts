@@ -638,7 +638,7 @@ export class GoogleSheetsClient {
       });
 
       // Write to a safe range using settings
-      const testRange = settings.getFullSheetRange(settings.getTicketTypesSheetName(), 'A20');
+      const testRange = settings.getFullSheetRange(settings.getMasterSheetName(), 'A20');
       await this.updateSheetRange(testRange, headers, rows, accessToken);
       
       log('info', 'Cross-tab test write successful!');
