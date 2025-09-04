@@ -4,7 +4,7 @@ import { PostgresClient } from '../services/postgres';
 import { EventMetrics } from '../types/vivenu';
 import { EventAvailability } from '../types/availability';
 import { Env } from '../types/env';
-import { REGIONS, createVivenuClients } from '../services/vivenu';
+import { REGIONS, createVivenuClients, discoverKVEventsAcrossRegions } from '../services/vivenu';
 import { log } from '../services/validation';
 
 /**
@@ -285,48 +285,14 @@ async function handleDashboardExport(
     // Get data based on source
     let dashboardData;
     if (source === 'vivenu') {
-      // Direct Vivenu API auto-discovery - find all events with charity tickets
-      log('info', 'Starting auto-discovery of events with charity tickets');
+      // KV Store auto-discovery - find all events from KV store across all seller accounts
+      log('info', 'Starting KV store event discovery across all regions');
       
-      const clients = createVivenuClients(env);
-      if (clients.length === 0) {
-        return new Response(JSON.stringify({
-          status: 'failed',
-          error: 'No Vivenu API clients available - check API key configuration'
-        }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
+      // Discover all events from KV store across all regions
+      const allKVEvents = await discoverKVEventsAcrossRegions(env);
 
-      // Find all events with charity tickets across all regions
-      const allEventsPromises = clients.map(async (client) => {
-        try {
-          // Get event IDs for this region from environment
-          const eventIds = getEventIdsForRegion(env, client.region);
-          
-          log('info', `Looking for charity events in ${client.region}`, {
-            region: client.region,
-            eventIds: eventIds.length,
-            eventIdsList: eventIds
-          });
-          
-          const charityEvents = await client.findEventsWithCharityTickets(eventIds);
-          return charityEvents.map(event => ({ event, client }));
-        } catch (error) {
-          log('error', `Failed to get charity events from ${client.region}`, {
-            region: client.region,
-            error: (error as Error).message
-          });
-          return [];
-        }
-      });
-
-      const eventsByRegion = await Promise.all(allEventsPromises);
-      const allCharityEvents = eventsByRegion.flat();
-
-      if (allCharityEvents.length === 0) {
-        log('warn', 'No HYROX events with charity tickets found in any region');
+      if (allKVEvents.length === 0) {
+        log('warn', 'No events found from KV store in any region');
         dashboardData = {
           events: [],
           summary: {
@@ -342,22 +308,22 @@ async function handleDashboardExport(
         };
       } else {
         // Use comprehensive ticket scraping for accurate data
-        const eventsPromises = allCharityEvents.map(async ({ event, client }) => {
+        const eventsPromises = allKVEvents.map(async ({ event, region, client }) => {
           try {
             // Get the API key from environment for this region
-            const regionConfig = REGIONS.find(r => r.name === client.region && r.enabled);
+            const regionConfig = REGIONS.find(r => r.name === region && r.enabled);
             if (!regionConfig) {
-              throw new Error(`No region configuration found for ${client.region}`);
+              throw new Error(`No region configuration found for ${region}`);
             }
             
             const apiKey = env[regionConfig.apiKey as keyof Env] as string;
             if (!apiKey) {
-              throw new Error(`No API key configured for region ${client.region} (missing ${regionConfig.apiKey})`);
+              throw new Error(`No API key configured for region ${region} (missing ${regionConfig.apiKey})`);
             }
             
             // Create AvailabilityService for this region to get comprehensive scraping
             const availabilityService = new AvailabilityService(
-              client.region, 
+              region, 
               apiKey, 
               regionConfig.baseUrl,
               env.KV || null,
@@ -368,10 +334,10 @@ async function handleDashboardExport(
             const availability = await availabilityService.getEventAvailability(event._id, false);
             return availability;
           } catch (error) {
-            const errorMsg = `Comprehensive ticket scraping FAILED for ${event.name} (${event._id}) in ${client.region}: ${(error as Error).message}`;
+            const errorMsg = `Comprehensive ticket scraping FAILED for ${event.name} (${event._id}) in ${region}: ${(error as Error).message}`;
             log('error', errorMsg, {
               eventId: event._id,
-              region: client.region,
+              region: region,
               eventName: event.name,
               error: (error as Error).message
             });
@@ -435,8 +401,8 @@ async function handleDashboardExport(
           lastRefresh: new Date().toISOString()
         };
 
-        log('info', 'Auto-discovery completed', {
-          totalEventsFound: allCharityEvents.length,
+        log('info', 'KV store discovery completed', {
+          totalEventsFound: allKVEvents.length,
           eventsWithMetrics: events.length,
           totalCapacity,
           totalSold,

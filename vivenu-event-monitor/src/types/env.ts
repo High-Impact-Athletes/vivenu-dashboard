@@ -7,6 +7,7 @@
  */
 export interface Env {
   KV?: KVNamespace;
+  EVENT_IDS?: KVNamespace;
   ENVIRONMENT?: 'development' | 'staging' | 'production';
   // Regional API keys (secrets via wrangler)
   USA_API?: string;

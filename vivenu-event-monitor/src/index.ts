@@ -3,7 +3,7 @@ import { handleScheduled } from './handlers/scheduled';
 import { handleAvailabilityRequest } from './handlers/availability';
 import { EventTracker } from './services/tracking';
 import { GoogleSheetsClient } from './services/sheets';
-import { createVivenuClients } from './services/vivenu';
+import { createVivenuClients, getEventIdsFromKV, discoverKVEventsAcrossRegions } from './services/vivenu';
 import { log } from './services/validation';
 
 export default {
@@ -45,6 +45,12 @@ export default {
 				
 				case '/test/vivenu-specific-event':
 					return await handleVivenuSpecificEventTest(env);
+
+				case '/test/kv-discovery':
+					return await handleKVDiscoveryTest(env);
+				
+				case '/test/env-debug':
+					return await handleEnvDebugTest(env);
 
 				case '/api/dashboard/export-to-sheets':
 					// Delegate to availability handler routing
@@ -971,6 +977,88 @@ async function handlePostgresConnectionTest(env: Env): Promise<Response> {
 			message: 'PostgreSQL connection test failed',
 			error: (error as Error).message,
 			endpoint: '/test/postgres-connection'
+		}), {
+			headers: { 'Content-Type': 'application/json' },
+			status: 500
+		});
+	}
+}
+
+async function handleKVDiscoveryTest(env: Env): Promise<Response> {
+	try {
+		log('info', 'Starting KV discovery test');
+		
+		const result: any = {
+			timestamp: new Date().toISOString(),
+			endpoint: '/test/kv-discovery',
+			status: 'running'
+		};
+		
+		// Test 1: Read event IDs from KV store
+		log('info', 'Step 1: Reading event IDs from KV store');
+		const kvEventIds = await getEventIdsFromKV(env.EVENT_IDS);
+		
+		result.kvStore = {
+			available: !!env.EVENT_IDS,
+			eventIds: kvEventIds,
+			count: kvEventIds.length
+		};
+		
+		log('info', `Found ${kvEventIds.length} event IDs in KV store`, { eventIds: kvEventIds });
+		
+		// Test 2: Cross-region discovery
+		log('info', 'Step 2: Cross-region event discovery');
+		const discoveredEvents = await discoverKVEventsAcrossRegions(env);
+		
+		result.discovery = {
+			eventsFound: discoveredEvents.length,
+			eventDetails: discoveredEvents.map(d => ({
+				eventId: d.event._id,
+				eventName: d.event.name,
+				region: d.region,
+				sellerId: d.event.sellerId
+			})),
+			regionBreakdown: Object.entries(
+				discoveredEvents.reduce((acc: Record<string, number>, d) => {
+					acc[d.region] = (acc[d.region] || 0) + 1;
+					return acc;
+				}, {})
+			).map(([region, count]) => ({ region, count }))
+		};
+		
+		result.status = 'success';
+		result.summary = {
+			kvEventIds: kvEventIds.length,
+			foundInRegions: discoveredEvents.length,
+			successRate: kvEventIds.length > 0 ? `${((discoveredEvents.length / kvEventIds.length) * 100).toFixed(1)}%` : '0%',
+			missingEvents: kvEventIds.filter(id => !discoveredEvents.some(d => d.event._id === id))
+		};
+		
+		log('info', 'KV discovery test completed', {
+			kvEventIds: kvEventIds.length,
+			foundEvents: discoveredEvents.length,
+			regions: discoveredEvents.map(d => d.region)
+		});
+		
+		return new Response(JSON.stringify(result, null, 2), {
+			headers: {
+				'Content-Type': 'application/json',
+				'Cache-Control': 'no-cache'
+			}
+		});
+		
+	} catch (error) {
+		log('error', 'KV discovery test failed', {
+			error: (error as Error).message,
+			stack: (error as Error).stack
+		});
+		
+		return new Response(JSON.stringify({
+			status: 'failed',
+			timestamp: new Date().toISOString(),
+			message: 'KV discovery test failed',
+			error: (error as Error).message,
+			endpoint: '/test/kv-discovery'
 		}), {
 			headers: { 'Content-Type': 'application/json' },
 			status: 500

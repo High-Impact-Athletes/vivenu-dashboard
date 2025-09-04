@@ -10,6 +10,11 @@ binding = "KV"
 id = "d40c6ee183574f0193a600ecfe00ecfc"
 preview_id = "caf7d381c9144efeaf6a1ce29b197ab3"
 
+# KV Namespace for event discovery  
+[[kv_namespaces]]
+binding = "EVENT_IDS"
+id = "2ad45f7d6f8b4d56887ec93d8e010426"
+
 # Scheduled cron trigger - runs daily at 4 AM UTC
 [triggers]
 crons = ["0 4 * * *"]
@@ -32,6 +37,10 @@ vars = { ENVIRONMENT = "development" }
 binding = "KV"
 id = "caf7d381c9144efeaf6a1ce29b197ab3"
 
+[[env.development.kv_namespaces]]
+binding = "EVENT_IDS"
+id = "2ad45f7d6f8b4d56887ec93d8e010426"
+
 # Staging environment
 [env.staging]
 name = "vivenu-event-monitor-staging"
@@ -40,6 +49,10 @@ vars = { ENVIRONMENT = "staging" }
 [[env.staging.kv_namespaces]]
 binding = "KV"
 id = "d40c6ee183574f0193a600ecfe00ecfc"
+
+[[env.staging.kv_namespaces]]
+binding = "EVENT_IDS"
+id = "2ad45f7d6f8b4d56887ec93d8e010426"
 
 # Note: Sensitive data should be added via wrangler secrets:
 # wrangler secret put VIVENU_SECRET

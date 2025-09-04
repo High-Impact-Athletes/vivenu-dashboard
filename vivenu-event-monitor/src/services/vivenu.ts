@@ -106,6 +106,73 @@ export class VivenuClient {
     }
   }
 
+  /**
+   * Get ALL events from this seller account using pagination.
+   * This is the true "list all events" method that uses the /api/events endpoint.
+   */
+  async getAllEventsFromSeller(): Promise<VivenuEvent[]> {
+    try {
+      log('info', `Fetching ALL events from ${this.region} seller account`, { region: this.region });
+      
+      const allEvents: VivenuEvent[] = [];
+      let skip = 0;
+      const batchSize = 100;
+      let totalFetched = 0;
+      
+      while (true) {
+        const url = `${this.baseUrl}/events?top=${batchSize}&skip=${skip}`;
+        
+        log('debug', `Fetching events batch: skip=${skip}, batchSize=${batchSize}`, {
+          region: this.region,
+          url,
+          totalFetched
+        });
+        
+        const response = await fetchWithRetry(url, {
+          headers: this.getHeaders()
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch events: ${response.status} ${response.statusText}`);
+        }
+
+        const data: VivenuListResponse<VivenuEvent> = await response.json();
+        const events = data.rows || [];
+        
+        log('debug', `Received ${events.length} events, total in response: ${data.total}`, {
+          region: this.region,
+          batchReceived: events.length,
+          totalInResponse: data.total,
+          currentTotal: allEvents.length
+        });
+        
+        allEvents.push(...events);
+        totalFetched += events.length;
+        
+        // Break if no more events or we've fetched everything
+        if (events.length === 0 || (data.total && totalFetched >= data.total)) {
+          break;
+        }
+        
+        skip += events.length;
+      }
+      
+      log('info', `Successfully fetched ${allEvents.length} total events from ${this.region}`, {
+        region: this.region,
+        totalEvents: allEvents.length,
+        eventNames: allEvents.map(e => e.name)
+      });
+
+      return allEvents;
+    } catch (error) {
+      log('error', `Failed to fetch all events from ${this.region}`, {
+        region: this.region,
+        error: (error as Error).message
+      });
+      return [];
+    }
+  }
+
   // REMOVED: getTicketMetrics() method - This method was fundamentally broken
   // It relied on ticket.sold from the Vivenu API, which doesn't provide accurate sold counts
   // All ticket sales data must come from comprehensive ticket scraping via AvailabilityService
@@ -151,6 +218,134 @@ export class VivenuClient {
       });
       return [];
     }
+  }
+}
+
+/**
+ * Read all event IDs from the KV store where value is "true"
+ */
+export async function getEventIdsFromKV(kv: KVNamespace | null | undefined): Promise<string[]> {
+  if (!kv) {
+    log('warn', 'KV store not available - cannot read event IDs');
+    return [];
+  }
+
+  try {
+    log('info', 'Reading event IDs from KV store');
+    
+    // List all keys in the KV store
+    const listResult = await kv.list();
+    const eventIds: string[] = [];
+    
+    // Check each key to see if its value is "true"
+    for (const key of listResult.keys) {
+      try {
+        const value = await kv.get(key.name);
+        if (value === 'true') {
+          eventIds.push(key.name);
+          log('debug', `Found event ID in KV store: ${key.name}`);
+        }
+      } catch (error) {
+        log('warn', `Failed to read KV key ${key.name}`, {
+          error: (error as Error).message
+        });
+      }
+    }
+    
+    log('info', `Found ${eventIds.length} event IDs in KV store`, {
+      eventIds: eventIds
+    });
+    
+    return eventIds;
+  } catch (error) {
+    log('error', 'Failed to read event IDs from KV store', {
+      error: (error as Error).message
+    });
+    return [];
+  }
+}
+
+/**
+ * Cross-region event discovery: Find events from KV store across all seller accounts
+ */
+export async function discoverKVEventsAcrossRegions(env: Env): Promise<{ event: VivenuEvent; region: string; client: VivenuClient }[]> {
+  try {
+    log('info', 'Starting cross-region event discovery using KV store');
+    
+    // Step 1: Get event IDs from KV store
+    const kvEventIds = await getEventIdsFromKV(env.EVENT_IDS);
+    if (kvEventIds.length === 0) {
+      log('warn', 'No event IDs found in KV store');
+      return [];
+    }
+
+    log('info', `Looking for ${kvEventIds.length} events from KV store across all regions`, {
+      kvEventIds: kvEventIds
+    });
+
+    // Step 2: Create clients for all regions
+    const clients = createVivenuClients(env);
+    if (clients.length === 0) {
+      log('error', 'No Vivenu clients available - check API key configuration');
+      return [];
+    }
+
+    log('info', `Created ${clients.length} Vivenu clients for regions: ${clients.map(c => c.region).join(', ')}`);
+
+    // Step 3: For each region, get all events and check for matches
+    const discoveredEvents: { event: VivenuEvent; region: string; client: VivenuClient }[] = [];
+    
+    for (const client of clients) {
+      try {
+        log('info', `Searching for KV events in ${client.region}...`);
+        
+        // Get all events from this seller account
+        const allEventsInRegion = await client.getAllEventsFromSeller();
+        
+        log('info', `Found ${allEventsInRegion.length} total events in ${client.region}`, {
+          region: client.region,
+          eventNames: allEventsInRegion.map(e => e.name)
+        });
+
+        // Check which ones match our KV store event IDs
+        const matchingEvents = allEventsInRegion.filter(event => kvEventIds.includes(event._id));
+        
+        log('info', `Found ${matchingEvents.length} matching events in ${client.region}`, {
+          region: client.region,
+          matchingEventIds: matchingEvents.map(e => e._id),
+          matchingEventNames: matchingEvents.map(e => e.name)
+        });
+
+        // Add to discovered events
+        for (const event of matchingEvents) {
+          discoveredEvents.push({
+            event,
+            region: client.region,
+            client
+          });
+        }
+        
+      } catch (error) {
+        log('error', `Failed to search for events in ${client.region}`, {
+          region: client.region,
+          error: (error as Error).message
+        });
+        // Continue with other regions
+      }
+    }
+
+    log('info', `Cross-region discovery completed: found ${discoveredEvents.length}/${kvEventIds.length} events`, {
+      foundEvents: discoveredEvents.map(d => ({ eventId: d.event._id, eventName: d.event.name, region: d.region })),
+      missingEventIds: kvEventIds.filter(id => !discoveredEvents.some(d => d.event._id === id))
+    });
+
+    return discoveredEvents;
+    
+  } catch (error) {
+    log('error', 'Failed cross-region event discovery', {
+      error: (error as Error).message
+    });
+    return [];
   }
 }
 
