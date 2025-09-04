@@ -5,15 +5,17 @@
 	"type": "module",
 	"scripts": {
 		"deploy": "wrangler deploy",
-		"dev": "wrangler dev",
+		"dev": "CLOUDFLARE_ACCOUNT_ID=7b67476729e32b63bb323f64706075c0 wrangler dev --x-remote-bindings -e development -c wrangler.toml",
+		"dev:local": "wrangler dev",
 		"dev:dashboard": "wrangler dev --env development && echo 'Dashboard available at http://localhost:8787/dashboard'",
 		"start": "wrangler dev",
 		"test": "vitest --run",
 		"test:availability": "python ./scripts/python/test_availability.py --all",
 		"test:dashboard": "python ./scripts/python/test_availability.py",
-		"test:frankfurt": "node test_frankfurt_charity.js",
 		"deploy:staging": "wrangler deploy --env staging",
-		"cf-typegen": "wrangler types"
+		"cf-typegen": "wrangler types",
+		"kv:event-ids:dev": "CLOUDFLARE_ACCOUNT_ID=7b67476729e32b63bb323f64706075c0 wrangler kv key list --remote -e development --binding EVENT_IDS -c wrangler.toml",
+		"kv:cache:dev": "CLOUDFLARE_ACCOUNT_ID=7b67476729e32b63bb323f64706075c0 wrangler kv key list --remote -e development --binding KV -c wrangler.toml"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.8.19",

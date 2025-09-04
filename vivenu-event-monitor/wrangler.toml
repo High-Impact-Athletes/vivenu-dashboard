@@ -14,6 +14,7 @@ preview_id = "caf7d381c9144efeaf6a1ce29b197ab3"
 [[kv_namespaces]]
 binding = "EVENT_IDS"
 id = "2ad45f7d6f8b4d56887ec93d8e010426"
+preview_id = "caf7d381c9144efeaf6a1ce29b197ab3"
 
 # Scheduled cron trigger - runs daily at 4 AM UTC
 [triggers]
@@ -31,15 +32,15 @@ enabled = true
 # Development environment
 [env.development]
 name = "vivenu-event-monitor-dev"
-vars = { ENVIRONMENT = "development" }
+vars = { ENVIRONMENT = "development", GOOGLE_SHEET_ID = "10dAtPhwPw3raEfSAbtCzMprVjCOHOctI-I1CASJeWFk" }
 
 [[env.development.kv_namespaces]]
 binding = "KV"
-id = "caf7d381c9144efeaf6a1ce29b197ab3"
+id = "caf7d381c9144efeaf6a1ce29b197ab3"  # Preview ID for local development
 
 [[env.development.kv_namespaces]]
 binding = "EVENT_IDS"
-id = "2ad45f7d6f8b4d56887ec93d8e010426"
+id = "2ad45f7d6f8b4d56887ec93d8e010426"  # Use prod EVENT_IDS for real data
 
 # Staging environment
 [env.staging]
