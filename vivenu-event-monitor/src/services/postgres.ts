@@ -2,9 +2,25 @@ import { neon } from '@neondatabase/serverless';
 import type { EventAvailability } from '../types/availability';
 import { log } from './validation';
 
+/**
+ * PostgreSQL client for primary event data storage.
+ * 
+ * This is the main data persistence layer for the HYROX event monitoring system.
+ * Stores comprehensive event availability data including time-series snapshots
+ * for historical tracking and analytics.
+ * 
+ * Uses Neon PostgreSQL with connection pooling and transaction support.
+ */
+
 export class PostgresClient {
   private sql: ReturnType<typeof neon>;
 
+  /**
+   * Creates a new PostgreSQL client for event data storage.
+   * 
+   * @param databaseUrl - Neon PostgreSQL connection string (required)
+   * @throws {Error} If DATABASE_URL is not provided
+   */
   constructor(databaseUrl: string) {
     if (!databaseUrl) {
       throw new Error('DATABASE_URL is required');
@@ -12,6 +28,20 @@ export class PostgresClient {
     this.sql = neon(databaseUrl);
   }
 
+  /**
+   * Writes a complete availability snapshot for multiple events to PostgreSQL.
+   * 
+   * This is the primary method for persisting event data. It performs:
+   * - Event metadata upserts
+   * - Ticket type definition upserts  
+   * - Time-series event snapshots (new records)
+   * - Time-series ticket type snapshots (new records)
+   * 
+   * All operations are executed in a single transaction for consistency.
+   * 
+   * @param events - Array of event availability data from comprehensive scraping
+   * @throws {Error} If database transaction fails
+   */
   async writeSnapshot(events: EventAvailability[]): Promise<void> {
     if (!events || events.length === 0) {
       log('warn', 'No events provided to writeSnapshot');
@@ -109,6 +139,13 @@ export class PostgresClient {
     }
   }
 
+  /**
+   * Tests the PostgreSQL database connection.
+   * 
+   * Used for health checks and deployment validation.
+   * 
+   * @returns True if connection is healthy, false otherwise
+   */
   async testConnection(): Promise<boolean> {
     try {
       const result = await this.sql`SELECT 1 as test`;
@@ -121,6 +158,14 @@ export class PostgresClient {
     }
   }
 
+  /**
+   * Gets the timestamp of the most recent snapshot for a specific event.
+   * 
+   * Used to determine if new data collection is needed or for analytics queries.
+   * 
+   * @param eventId - The Vivenu event ID to query
+   * @returns Last snapshot timestamp, or null if no snapshots exist
+   */
   async getLastSnapshotTime(eventId: string): Promise<Date | null> {
     try {
       const result = await this.sql`

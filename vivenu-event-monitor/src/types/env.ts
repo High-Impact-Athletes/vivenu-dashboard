@@ -1,3 +1,10 @@
+/**
+ * Environment interface for the Vivenu Event Monitoring Worker.
+ * 
+ * PRIMARY REQUIREMENT: DATABASE_URL must be configured for PostgreSQL storage.
+ * Regional API keys are required for comprehensive event data collection.
+ * Google Sheets integration is optional for legacy support only.
+ */
 export interface Env {
   KV?: KVNamespace;
   ENVIRONMENT?: 'development' | 'staging' | 'production';
@@ -52,11 +59,11 @@ export interface Env {
   STOCKHOLM_EVENT?: string;
   COPENHAGEN_EVENT?: string;
 
-  // Google Sheets
+  // PRIMARY DATABASE (REQUIRED)
+  DATABASE_URL?: string;  // Neon PostgreSQL connection string - MUST be configured
+
+  // Legacy Google Sheets support (OPTIONAL)  
   GOOGLE_SHEET_ID?: string;
   GOOGLE_SERVICE_ACCOUNT_EMAIL?: string;
   GOOGLE_PRIVATE_KEY?: string;
-
-  // Neon PostgreSQL Database
-  DATABASE_URL?: string;
 }

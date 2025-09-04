@@ -1,7 +1,7 @@
 # Vivenu Event Monitoring Worker - Requirements Specification
 
 ## Executive Summary
-Build a Cloudflare Worker that monitors HYROX events across all Vivenu seller accounts, tracking event launch dates, ticket sales, and inventory in real-time. The system will subscribe to webhooks for event updates and perform daily polling for sales metrics, exporting all data to Google Sheets for analytics.
+Build a Cloudflare Worker that monitors HYROX events across all Vivenu seller accounts, tracking event launch dates, ticket sales, and inventory in real-time. The system will subscribe to webhooks for event updates and perform daily polling for sales metrics, storing all data in a PostgreSQL database for analytics and reporting.
 
 ## System Architecture Overview
 
@@ -9,13 +9,16 @@ Build a Cloudflare Worker that monitors HYROX events across all Vivenu seller ac
 1. **Cloudflare Worker**: Main application hosting webhook endpoint and scheduled tasks
 2. **Webhook Endpoint**: Receives `event.updated` notifications from Vivenu
 3. **Scheduled Polling**: Daily cron job to fetch ticket sales data
-4. **Google Sheets API**: Data export destination
+4. **PostgreSQL Database**: Primary data storage for event metrics and historical tracking
 5. **KV Storage**: Cache for API keys, event metadata, and rate limiting
+6. **Google Sheets API**: Legacy export destination (optional)
 
 ### Data Flow
 ```
-Vivenu Webhooks → Worker Endpoint → Process Event Updates → Google Sheets
-Cron Trigger → Worker → Poll All Events → Aggregate Sales Data → Google Sheets
+Vivenu Webhooks → Worker Endpoint → Process Event Updates → PostgreSQL Database
+Cron Trigger → Worker → Poll All Events → Comprehensive Ticket Scraping → PostgreSQL Database
+                                                                        ↓
+                                                          (Optional) Google Sheets Export
 ```
 
 ## 1. Vivenu API Integration
@@ -230,56 +233,71 @@ async function getTicketMetrics(eventId, apiKey, region) {
 
 **UNCERTAINTY**: The exact field names for ticket inventory (sold/available) may vary. The existing codebase shows `amount` for capacity, but the sold count field needs verification.
 
-## 4. Google Sheets Integration
+## 4. PostgreSQL Database Integration
 
-### 4.1 Authentication
-Use service account for Google Sheets API:
+### 4.1 Database Connection
+Use Neon PostgreSQL with connection pooling:
 
 ```javascript
 // Environment variables needed
+DATABASE_URL  // Primary requirement - Neon PostgreSQL connection string
+
+// Optional legacy Google Sheets support
 GOOGLE_SERVICE_ACCOUNT_EMAIL
 GOOGLE_PRIVATE_KEY
 GOOGLE_SHEET_ID
 ```
 
-### 4.2 Data Schema
-Structure for Google Sheets export:
+### 4.2 Database Schema
+PostgreSQL tables for comprehensive event tracking:
 
-```javascript
-// Main Events Sheet
-const eventRow = {
-  'Event ID': eventId,
-  'Region': region,
-  'Event Name': eventName,
-  'Event Date': eventDate,
-  'Sales Launch Date': salesStartDate,
-  'Status': status,
-  'Total Capacity': totalCapacity,
-  'Total Sold': totalSold,
-  'Total Available': totalAvailable,
-  'Percent Sold': percentSold,
-  'Last Updated': timestamp
-};
+```sql
+-- Core event metadata
+CREATE TABLE events (
+  event_id VARCHAR PRIMARY KEY,
+  event_name VARCHAR NOT NULL,
+  event_date TIMESTAMP,
+  sales_start_date TIMESTAMP,
+  region VARCHAR NOT NULL,
+  status VARCHAR NOT NULL
+);
 
-// Ticket Types Sheet (detailed breakdown)
-const ticketRow = {
-  'Event ID': eventId,
-  'Event Name': eventName,
-  'Ticket Type ID': ticketTypeId,
-  'Ticket Name': ticketName,
-  'Price': price,
-  'Currency': currency,
-  'Capacity': capacity,
-  'Sold': sold,
-  'Available': available,
-  'Last Updated': timestamp
-};
+-- Ticket type definitions
+CREATE TABLE ticket_types (
+  event_id VARCHAR NOT NULL,
+  ticket_type_id VARCHAR NOT NULL,
+  ticket_type_name VARCHAR NOT NULL,
+  PRIMARY KEY (event_id, ticket_type_id)
+);
+
+-- Time-series event snapshots
+CREATE TABLE event_snapshots (
+  snapshot_time TIMESTAMP NOT NULL,
+  event_id VARCHAR NOT NULL,
+  total_capacity INTEGER,
+  total_sold INTEGER,
+  total_available INTEGER,
+  percent_sold DECIMAL,
+  last_updated TIMESTAMP
+);
+
+-- Time-series ticket type snapshots
+CREATE TABLE ticket_type_snapshots (
+  snapshot_time TIMESTAMP NOT NULL,
+  event_id VARCHAR NOT NULL,
+  ticket_type_id VARCHAR NOT NULL,
+  capacity INTEGER,
+  sold INTEGER,
+  available INTEGER
+);
 ```
 
-### 4.3 Update Strategy
-- Use batch updates to minimize API calls
-- Update or insert based on Event ID as primary key
-- Maintain historical data with timestamps
+### 4.3 Data Storage Strategy
+- Use PostgreSQL transactions for atomic updates
+- Upsert event metadata and ticket types
+- Insert time-series snapshots for historical tracking
+- Comprehensive scraping provides accurate sold counts
+- Optimized for analytical queries and reporting
 
 ## 5. Worker Implementation Structure
 
@@ -400,12 +418,17 @@ kv_namespaces = [
 crons = ["0 2 * * *"]
 
 [vars]
-GOOGLE_SHEET_ID = "your-sheet-id"
+GOOGLE_SHEET_ID = "your-sheet-id"  # Optional - legacy support only
 ```
 
 ### 7.2 Environment Variables
 ```bash
 # Set via wrangler secret
+
+# Primary database (REQUIRED)
+wrangler secret put DATABASE_URL
+
+# Regional API keys
 wrangler secret put VIVENU_SECRET
 wrangler secret put DACH_API
 wrangler secret put FRANCE_API
@@ -415,6 +438,8 @@ wrangler secret put USA_API
 wrangler secret put CANADA_API
 wrangler secret put AUSTRALIA_API
 wrangler secret put NORWAY_API
+
+# Optional legacy Google Sheets support
 wrangler secret put GOOGLE_SERVICE_ACCOUNT_EMAIL
 wrangler secret put GOOGLE_PRIVATE_KEY
 ```
@@ -456,7 +481,9 @@ const DEV_CONFIG = {
 - Webhook processing latency
 - Daily poll completion rate
 - API error rates by region
-- Google Sheets update success rate
+- PostgreSQL write success rate
+- Database connection health
+- Scraping accuracy and completeness
 
 ### 9.2 Alerting
 Set up Cloudflare Analytics alerts for:
@@ -553,10 +580,11 @@ signature = hmac.new(
 
 The worker will be considered successful when it:
 1. ✅ Receives and processes event.updated webhooks within 5 seconds
-2. ✅ Completes daily polling of all regions within 5 minutes
-3. ✅ Updates Google Sheets with < 1% error rate
+2. ✅ Completes daily polling of all regions within 10 minutes (comprehensive scraping)
+3. ✅ Writes to PostgreSQL database with < 0.1% error rate
 4. ✅ Maintains 99.9% uptime
-5. ✅ Provides real-time visibility into all HYROX events globally
+5. ✅ Provides accurate real-time visibility into all HYROX events globally
+6. ✅ Achieves >95% ticket scraping completeness for reliable sold counts
 
 ## 15. Next Steps
 

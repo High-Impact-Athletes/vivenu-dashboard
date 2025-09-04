@@ -22,29 +22,29 @@ export default {
 				case '/poll/manual':
 					return await handleManualPoll(request, env);
 				
-				case '/test/google-auth':
-					return await handleGoogleAuthTest(env);
-				
-				case '/test/ticket-data':
-					return await handleTicketDataTest(env);
-				
-				case '/test/event-config':
-					return await handleEventConfigTest(env);
-				
-				case '/test/vivenu-events':
-					return await handleVivenuEventsTest(env);
-				
-				case '/test/vivenu-specific-event':
-					return await handleVivenuSpecificEventTest(env);
-				
+				case '/test/postgres-connection':
+					return await handlePostgresConnectionTest(env);
+
 				case '/test/scrape-atlanta':
 					return await handleScrapeAtlantaTest(env);
 				
 				case '/test/scrape-validation':
 					return await handleScrapeValidationTest(env);
 
-				case '/test/postgres-connection':
-					return await handlePostgresConnectionTest(env);
+				case '/test/vivenu-events':
+					return await handleVivenuEventsTest(env);
+				
+				case '/test/event-config':
+					return await handleEventConfigTest(env);
+
+				case '/test/google-auth':
+					return await handleGoogleAuthTest(env);
+				
+				case '/test/ticket-data':
+					return await handleTicketDataTest(env);
+				
+				case '/test/vivenu-specific-event':
+					return await handleVivenuSpecificEventTest(env);
 
 				case '/api/dashboard/export-to-sheets':
 					// Delegate to availability handler routing
@@ -256,9 +256,17 @@ async function handleManualPoll(request: Request, env: Env): Promise<Response> {
 	}
 }
 
+/**
+ * Tests Google Sheets authentication - LEGACY feature.
+ * 
+ * Google Sheets integration is optional and maintained for backward compatibility only.
+ * The primary data export is now PostgreSQL database storage.
+ * 
+ * Only use this if you need legacy Google Sheets export functionality.
+ */
 async function handleGoogleAuthTest(env: Env): Promise<Response> {
 	try {
-		log('info', 'Starting Google Auth test');
+		log('info', 'Starting Google Auth test - LEGACY feature');
 		
 		const sheetsClient = new GoogleSheetsClient(env);
 		
@@ -884,9 +892,17 @@ async function handleScrapeValidationTest(env: Env): Promise<Response> {
 	}
 }
 
+/**
+ * Tests PostgreSQL database connectivity - PRIMARY health check.
+ * 
+ * This is the most important test endpoint as PostgreSQL is the main data store.
+ * Validates that DATABASE_URL is configured and database is responsive.
+ * 
+ * Use this endpoint to verify deployment before running data collection.
+ */
 async function handlePostgresConnectionTest(env: Env): Promise<Response> {
 	try {
-		log('info', 'Starting PostgreSQL connection test');
+		log('info', 'Starting PostgreSQL connection test - PRIMARY health check');
 		
 		const { PostgresClient } = await import('./services/postgres');
 		

@@ -7,6 +7,15 @@ import { Env } from '../types/env';
 import { REGIONS, createVivenuClients } from '../services/vivenu';
 import { log } from '../services/validation';
 
+/**
+ * Handles event availability API requests including dashboard data and exports.
+ * 
+ * Primary export format is PostgreSQL database storage for persistent analytics.
+ * Also supports legacy Google Sheets export and real-time dashboard data.
+ * 
+ * Uses comprehensive ticket scraping to provide accurate sold counts rather
+ * than basic API calls that return misleading zero values.
+ */
 export async function handleAvailabilityRequest(
   request: Request,
   env: Env,
