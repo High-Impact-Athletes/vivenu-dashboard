@@ -5,10 +5,16 @@ import { EventTracker } from './services/tracking';
 import { GoogleSheetsClient } from './services/sheets';
 import { createVivenuClients, getEventIdsFromKV, discoverKVEventsAcrossRegions } from './services/vivenu';
 import { log } from './services/validation';
+import { createReadOnlyKVNamespace } from './utils/read-only-kv';
 
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
+		
+		if (env.READ_ONLY_KV === 'true') {
+			env.KV = createReadOnlyKVNamespace(env.KV) || undefined;
+			env.EVENT_IDS = createReadOnlyKVNamespace(env.EVENT_IDS) || undefined;
+		}
 		
 		try {
 			switch (url.pathname) {
@@ -81,6 +87,10 @@ export default {
 	},
 
 	async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+		if (env.READ_ONLY_KV === 'true') {
+			env.KV = createReadOnlyKVNamespace(env.KV) || undefined;
+			env.EVENT_IDS = createReadOnlyKVNamespace(env.EVENT_IDS) || undefined;
+		}
 		try {
 			await handleScheduled(controller, env);
 		} catch (error) {
@@ -232,7 +242,7 @@ async function handleManualPoll(request: Request, env: Env): Promise<Response> {
 		};
 
 		const httpStatus = pollResult.status === 'completed' ? 200 : 
-						  pollResult.status === 'partial' ? 207 : 500;
+					  pollResult.status === 'partial' ? 207 : 500;
 
 		return new Response(JSON.stringify(response, null, 2), {
 			headers: {

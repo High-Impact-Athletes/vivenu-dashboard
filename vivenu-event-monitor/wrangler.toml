@@ -8,13 +8,13 @@ account_id = "7b67476729e32b63bb323f64706075c0"
 [[kv_namespaces]]
 binding = "KV"
 id = "d40c6ee183574f0193a600ecfe00ecfc"
-preview_id = "caf7d381c9144efeaf6a1ce29b197ab3"
+preview_id = "d40c6ee183574f0193a600ecfe00ecfc"
 
 # KV Namespace for event discovery  
 [[kv_namespaces]]
 binding = "EVENT_IDS"
 id = "2ad45f7d6f8b4d56887ec93d8e010426"
-preview_id = "caf7d381c9144efeaf6a1ce29b197ab3"
+preview_id = "2ad45f7d6f8b4d56887ec93d8e010426"
 
 # Scheduled cron trigger - runs daily at 4 AM UTC
 [triggers]
@@ -24,36 +24,13 @@ crons = ["0 4 * * *"]
 [vars]
 GOOGLE_SHEET_ID = "10dAtPhwPw3raEfSAbtCzMprVjCOHOctI-I1CASJeWFk"
 ENVIRONMENT = "production"
+READ_ONLY_KV = "true"
 
 # Observability
 [observability]
 enabled = true
 
-# Development environment
-[env.development]
-name = "vivenu-event-monitor-dev"
-vars = { ENVIRONMENT = "development", GOOGLE_SHEET_ID = "10dAtPhwPw3raEfSAbtCzMprVjCOHOctI-I1CASJeWFk" }
-
-[[env.development.kv_namespaces]]
-binding = "KV"
-id = "caf7d381c9144efeaf6a1ce29b197ab3"  # Preview ID for local development
-
-[[env.development.kv_namespaces]]
-binding = "EVENT_IDS"
-id = "2ad45f7d6f8b4d56887ec93d8e010426"  # Use prod EVENT_IDS for real data
-
-# Staging environment
-[env.staging]
-name = "vivenu-event-monitor-staging"
-vars = { ENVIRONMENT = "staging" }
-
-[[env.staging.kv_namespaces]]
-binding = "KV"
-id = "d40c6ee183574f0193a600ecfe00ecfc"
-
-[[env.staging.kv_namespaces]]
-binding = "EVENT_IDS"
-id = "2ad45f7d6f8b4d56887ec93d8e010426"
+ 
 
 # Note: Sensitive data should be added via wrangler secrets:
 # wrangler secret put VIVENU_SECRET

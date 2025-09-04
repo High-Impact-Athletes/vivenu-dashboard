@@ -5,7 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"deploy": "wrangler deploy",
-		"dev": "CLOUDFLARE_ACCOUNT_ID=7b67476729e32b63bb323f64706075c0 wrangler dev --x-remote-bindings -e development -c wrangler.toml",
+		"dev": "CLOUDFLARE_ACCOUNT_ID=7b67476729e32b63bb323f64706075c0 wrangler dev --remote -e development -c wrangler.toml",
 		"dev:local": "wrangler dev",
 		"dev:dashboard": "wrangler dev --env development && echo 'Dashboard available at http://localhost:8787/dashboard'",
 		"start": "wrangler dev",
