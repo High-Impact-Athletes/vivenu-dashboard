@@ -106,88 +106,10 @@ export class VivenuClient {
     }
   }
 
-  async getTicketMetrics(eventId: string): Promise<EventMetrics | null> {
-    try {
-      log('info', `Getting ticket metrics for event ${eventId}`, { 
-        region: this.region, 
-        eventId 
-      });
-
-      // Fetch event with tickets included
-      const url = `${this.baseUrl}/events/${eventId}?include=tickets`;
-      const response = await fetchWithRetry(url, {
-        headers: this.getHeaders()
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const event: VivenuEvent = await response.json();
-
-      // Calculate metrics from ticket types
-      const ticketTypes: TicketTypeMetrics[] = [];
-      let totalCapacity = 0;
-      let totalSold = 0;
-
-      if (event.tickets) {
-        for (const ticket of event.tickets) {
-          if (!ticket.active) continue;
-          
-          const capacity = ticket.amount;
-          const sold = ticket.sold || 0;
-          const available = capacity - sold;
-          
-          totalCapacity += capacity;
-          totalSold += sold;
-
-          ticketTypes.push({
-            id: ticket._id,
-            name: ticket.name,
-            price: ticket.price,
-            capacity,
-            sold,
-            available
-          });
-        }
-      }
-
-      const totalAvailable = totalCapacity - totalSold;
-      const percentSold = totalCapacity > 0 ? (totalSold / totalCapacity) * 100 : 0;
-
-      const metrics: EventMetrics = {
-        eventId: event._id,
-        eventName: event.name,
-        eventDate: event.start,
-        salesStartDate: event.sellStart,
-        region: this.region,
-        status: event.status,
-        totalCapacity,
-        totalSold,
-        totalAvailable,
-        percentSold: Math.round(percentSold * 100) / 100,
-        ticketTypes,
-        lastUpdated: new Date().toISOString()
-      };
-
-      log('info', `Generated metrics for ${event.name}`, {
-        eventId,
-        totalCapacity,
-        totalSold,
-        percentSold: metrics.percentSold,
-        ticketTypesCount: ticketTypes.length
-      });
-
-      return metrics;
-    } catch (error) {
-      log('error', `Failed to get ticket metrics for ${eventId}`, {
-        region: this.region,
-        eventId,
-        error: (error as Error).message
-      });
-      return null;
-    }
-  }
+  // REMOVED: getTicketMetrics() method - This method was fundamentally broken
+  // It relied on ticket.sold from the Vivenu API, which doesn't provide accurate sold counts
+  // All ticket sales data must come from comprehensive ticket scraping via AvailabilityService
+  // If you need ticket data, use AvailabilityService.getEventAvailability() instead
 
   async findEventsWithCharityTickets(eventIds?: string[]): Promise<VivenuEvent[]> {
     try {

@@ -337,10 +337,14 @@ async function handleDashboardExport(
           try {
             // Get the API key from environment for this region
             const regionConfig = REGIONS.find(r => r.name === client.region && r.enabled);
-            if (!regionConfig) return null;
+            if (!regionConfig) {
+              throw new Error(`No region configuration found for ${client.region}`);
+            }
             
             const apiKey = env[regionConfig.apiKey as keyof Env] as string;
-            if (!apiKey) return null;
+            if (!apiKey) {
+              throw new Error(`No API key configured for region ${client.region} (missing ${regionConfig.apiKey})`);
+            }
             
             // Create AvailabilityService for this region to get comprehensive scraping
             const availabilityService = new AvailabilityService(
@@ -355,16 +359,37 @@ async function handleDashboardExport(
             const availability = await availabilityService.getEventAvailability(event._id, false);
             return availability;
           } catch (error) {
-            log('error', `Failed to get metrics for ${event.name}`, {
+            const errorMsg = `Comprehensive ticket scraping FAILED for ${event.name} (${event._id}) in ${client.region}: ${(error as Error).message}`;
+            log('error', errorMsg, {
               eventId: event._id,
               region: client.region,
+              eventName: event.name,
               error: (error as Error).message
             });
-            return null;
+            // FAIL FAST - Do not return null, throw error to prevent silent failures
+            throw new Error(errorMsg);
           }
         });
 
-        const events = (await Promise.all(eventsPromises)).filter(e => e !== null) as EventAvailability[];
+        // No filtering needed - all events must succeed or the entire export fails
+        const events = await Promise.all(eventsPromises);
+
+        // VALIDATION: Ensure comprehensive scraping worked - no silent zero-sold failures
+        const eventsWithSales = events.filter(event => event.totals.sold > 0);
+        if (eventsWithSales.length === 0 && events.length > 0) {
+          throw new Error(`CRITICAL: All ${events.length} events show 0 tickets sold. Comprehensive ticket scraping has failed. This indicates the basic API fallback is being used instead of real ticket scraping. Export aborted to prevent misleading data.`);
+        }
+        
+        const percentWithSales = events.length > 0 ? (eventsWithSales.length / events.length) * 100 : 0;
+        if (percentWithSales < 50) {
+          log('warn', `WARNING: Only ${eventsWithSales.length}/${events.length} events (${percentWithSales.toFixed(1)}%) have ticket sales data. This may indicate scraping issues.`);
+        }
+
+        log('info', `Data validation passed: ${eventsWithSales.length}/${events.length} events have real ticket sales data`, {
+          totalEvents: events.length,
+          eventsWithSales: eventsWithSales.length,
+          percentWithSales: percentWithSales.toFixed(1)
+        });
 
         // Calculate summary
         let totalCapacity = 0;

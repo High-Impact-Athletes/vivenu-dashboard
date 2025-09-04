@@ -340,13 +340,9 @@ async function handleTicketDataTest(env: Env): Promise<Response> {
 			throw new Error('No HYROX events found');
 		}
 		
-		// Get metrics for the first event
-		const firstEvent = hyroxEvents[0];
-		const metrics = await dachClient.getTicketMetrics(firstEvent._id);
-		
-		if (!metrics) {
-			throw new Error('Failed to get ticket metrics');
-		}
+		// REMOVED: getTicketMetrics() - this test endpoint is deprecated
+		// The basic API method doesn't provide real sold counts
+		throw new Error('This test endpoint has been removed. Use /test/scrape-validation for real ticket data testing.');
 		
 		// Show the ticket types data structure
 		const testResult = {
@@ -602,39 +598,11 @@ async function handleVivenuSpecificEventTest(env: Env): Promise<Response> {
 		try {
 			log('info', `Testing specific event: ${ATLANTA25_EVENT_ID}`);
 			
-			// Test with the corrected API call pattern
-			const metrics = await usaClient.getTicketMetrics(ATLANTA25_EVENT_ID);
-			
-			if (metrics) {
-				results.status = 'success';
-				results.eventData = {
-					eventId: metrics.eventId,
-					eventName: metrics.eventName,
-					eventDate: metrics.eventDate,
-					region: metrics.region,
-					totalCapacity: metrics.totalCapacity,
-					totalSold: metrics.totalSold,
-					totalAvailable: metrics.totalAvailable,
-					percentSold: metrics.percentSold,
-					ticketTypesCount: metrics.ticketTypes.length,
-					ticketTypes: metrics.ticketTypes.map(tt => ({
-						name: tt.name,
-						capacity: tt.capacity,
-						sold: tt.sold,
-						available: tt.available
-					}))
-				};
-				
-				log('info', `Successfully fetched specific event: ${metrics.eventName}`, {
-					eventId: metrics.eventId,
-					ticketTypes: metrics.ticketTypes.length,
-					totalCapacity: metrics.totalCapacity,
-					totalSold: metrics.totalSold
-				});
-			} else {
-				results.status = 'failed';
-				results.error = 'getTicketMetrics returned null';
-			}
+			// REMOVED: getTicketMetrics() test - this method was fundamentally broken
+			// It used basic API calls that don't provide real sold counts
+			results.status = 'deprecated';
+			results.error = 'This test endpoint has been removed. getTicketMetrics() provided misleading zero-sold data.';
+			results.replacement = 'Use /test/scrape-atlanta or /test/scrape-validation for real ticket data testing with comprehensive scraping.';
 			
 		} catch (error) {
 			results.status = 'failed';
