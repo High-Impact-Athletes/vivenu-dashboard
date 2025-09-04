@@ -1,5 +1,6 @@
 import { AvailabilityService } from '../services/availability';
 import { GoogleSheetsClient } from '../services/sheets';
+import { PostgresClient } from '../services/postgres';
 import { EventMetrics } from '../types/vivenu';
 import { EventAvailability } from '../types/availability';
 import { Env } from '../types/env';
@@ -262,7 +263,7 @@ async function handleDashboardExport(
 ): Promise<Response> {
   try {
     const url = new URL(request.url);
-    const format = url.searchParams.get('format') || 'dashboard'; // 'dashboard' (new analytics format) or 'wide' (legacy cross-tab)
+    const format = url.searchParams.get('format') || 'postgres'; // 'postgres' (primary), 'dashboard' (Google Sheets), or 'wide' (legacy cross-tab)
     const source = url.searchParams.get('source') || 'dashboard'; // 'dashboard' or 'vivenu'
     const clear = url.searchParams.get('clear') === 'true';
 
@@ -292,7 +293,16 @@ async function handleDashboardExport(
       // Find all events with charity tickets across all regions
       const allEventsPromises = clients.map(async (client) => {
         try {
-          const charityEvents = await client.findEventsWithCharityTickets();
+          // Get event IDs for this region from environment
+          const eventIds = getEventIdsForRegion(env, client.region);
+          
+          log('info', `Looking for charity events in ${client.region}`, {
+            region: client.region,
+            eventIds: eventIds.length,
+            eventIdsList: eventIds
+          });
+          
+          const charityEvents = await client.findEventsWithCharityTickets(eventIds);
           return charityEvents.map(event => ({ event, client }));
         } catch (error) {
           log('error', `Failed to get charity events from ${client.region}`, {
@@ -322,41 +332,27 @@ async function handleDashboardExport(
           lastRefresh: new Date().toISOString()
         };
       } else {
-        // Convert to EventAvailability format for the dashboard
+        // Use comprehensive ticket scraping for accurate data
         const eventsPromises = allCharityEvents.map(async ({ event, client }) => {
           try {
-            const metrics = await client.getTicketMetrics(event._id);
-            if (!metrics) return null;
-
-            // Convert EventMetrics to EventAvailability format
-            const availability: EventAvailability = {
-              eventId: metrics.eventId,
-              eventName: metrics.eventName,
-              eventDate: metrics.eventDate,
-              region: metrics.region,
-              ticketTypes: metrics.ticketTypes.map(tt => ({
-                id: tt.id,
-                name: tt.name,
-                capacity: tt.capacity,
-                sold: tt.sold,
-                available: tt.available,
-                percentSold: tt.capacity > 0 ? (tt.sold / tt.capacity) * 100 : 0,
-                status: tt.capacity > 0 ? 
-                  (tt.available === 0 ? 'soldout' : 
-                   tt.available < tt.capacity * 0.1 ? 'limited' : 'available') : 'soldout',
-                price: tt.price
-              })),
-              totals: {
-                capacity: metrics.totalCapacity,
-                sold: metrics.totalSold,
-                available: metrics.totalAvailable,
-                percentSold: metrics.percentSold,
-                status: metrics.totalAvailable === 0 ? 'soldout' : 
-                        metrics.totalAvailable < metrics.totalCapacity * 0.1 ? 'limited' : 'available'
-              },
-              lastUpdated: metrics.lastUpdated
-            };
-
+            // Get the API key from environment for this region
+            const regionConfig = REGIONS.find(r => r.name === client.region && r.enabled);
+            if (!regionConfig) return null;
+            
+            const apiKey = env[regionConfig.apiKey as keyof Env] as string;
+            if (!apiKey) return null;
+            
+            // Create AvailabilityService for this region to get comprehensive scraping
+            const availabilityService = new AvailabilityService(
+              client.region, 
+              apiKey, 
+              regionConfig.baseUrl,
+              env.KV || null,
+              env
+            );
+            
+            // Get comprehensive availability with ticket scraping
+            const availability = await availabilityService.getEventAvailability(event._id, false);
             return availability;
           } catch (error) {
             log('error', `Failed to get metrics for ${event.name}`, {
@@ -423,6 +419,35 @@ async function handleDashboardExport(
     }
 
     const events = dashboardData.events;
+
+    if (format === 'postgres') {
+      // Primary export to PostgreSQL database
+      if (!env.DATABASE_URL) {
+        return new Response(JSON.stringify({
+          status: 'failed',
+          error: 'DATABASE_URL not configured'
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      const postgres = new PostgresClient(env.DATABASE_URL);
+      await postgres.writeSnapshot(events);
+
+      return new Response(JSON.stringify({
+        status: 'success',
+        message: 'Dashboard exported to PostgreSQL database',
+        format: 'postgres',
+        eventsExported: events.length,
+        totalTicketTypes: events.reduce((sum, event) => sum + event.ticketTypes.length, 0),
+        timestamp: new Date().toISOString()
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Google Sheets export (optional, legacy support)
     const sheets = new GoogleSheetsClient(env);
 
     if (format === 'dashboard') {

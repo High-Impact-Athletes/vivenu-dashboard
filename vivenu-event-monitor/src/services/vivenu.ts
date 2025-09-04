@@ -37,28 +37,66 @@ export class VivenuClient {
     };
   }
 
-  async getAllEvents(): Promise<VivenuEvent[]> {
+  async getAllEvents(eventIds?: string[]): Promise<VivenuEvent[]> {
     try {
-      log('info', `Fetching all events for ${this.region}`, { region: this.region });
-      
-      const url = `${this.baseUrl}/events?include=tickets&top=100`;
-      const response = await fetchWithRetry(url, {
-        headers: this.getHeaders()
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      // If no specific event IDs provided, return empty array
+      // (The old method of listing all events doesn't work with Vivenu API)
+      if (!eventIds || eventIds.length === 0) {
+        log('warn', `No event IDs provided for ${this.region} - cannot list all events`, { region: this.region });
+        return [];
       }
 
-      const data: VivenuListResponse<VivenuEvent> = await response.json();
-      
-      log('info', `Found ${data.rows.length} events in ${this.region}`, { 
+      log('info', `Fetching ${eventIds.length} specific events for ${this.region}`, { 
         region: this.region,
-        totalEvents: data.total,
-        fetched: data.rows.length
+        eventIds 
+      });
+      
+      const events: VivenuEvent[] = [];
+      
+      // Fetch each event individually
+      for (const eventId of eventIds) {
+        try {
+          const url = `${this.baseUrl}/events/${eventId}?include=tickets`;
+          const response = await fetchWithRetry(url, {
+            headers: this.getHeaders()
+          });
+
+          if (!response.ok) {
+            log('warn', `Failed to fetch event ${eventId}`, {
+              region: this.region,
+              eventId,
+              status: response.status,
+              statusText: response.statusText
+            });
+            continue;
+          }
+
+          const event: VivenuEvent = await response.json();
+          events.push(event);
+          
+          log('info', `Successfully fetched event: ${event.name}`, {
+            region: this.region,
+            eventId: event._id,
+            ticketTypes: event.tickets?.length || 0
+          });
+          
+        } catch (error) {
+          log('error', `Error fetching event ${eventId}`, {
+            region: this.region,
+            eventId,
+            error: (error as Error).message
+          });
+          continue;
+        }
+      }
+      
+      log('info', `Found ${events.length}/${eventIds.length} events in ${this.region}`, { 
+        region: this.region,
+        requested: eventIds.length,
+        found: events.length
       });
 
-      return data.rows;
+      return events;
     } catch (error) {
       log('error', `Failed to fetch events for ${this.region}`, {
         region: this.region,
@@ -151,9 +189,9 @@ export class VivenuClient {
     }
   }
 
-  async findEventsWithCharityTickets(): Promise<VivenuEvent[]> {
+  async findEventsWithCharityTickets(eventIds?: string[]): Promise<VivenuEvent[]> {
     try {
-      const allEvents = await this.getAllEvents();
+      const allEvents = await this.getAllEvents(eventIds);
       
       const eventsWithCharity = allEvents.filter(event => {
         // Filter for HYROX events first

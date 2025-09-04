@@ -27,6 +27,24 @@ export default {
 				
 				case '/test/ticket-data':
 					return await handleTicketDataTest(env);
+				
+				case '/test/event-config':
+					return await handleEventConfigTest(env);
+				
+				case '/test/vivenu-events':
+					return await handleVivenuEventsTest(env);
+				
+				case '/test/vivenu-specific-event':
+					return await handleVivenuSpecificEventTest(env);
+				
+				case '/test/scrape-atlanta':
+					return await handleScrapeAtlantaTest(env);
+				
+				case '/test/scrape-validation':
+					return await handleScrapeValidationTest(env);
+
+				case '/test/postgres-connection':
+					return await handlePostgresConnectionTest(env);
 
 				case '/api/dashboard/export-to-sheets':
 					// Delegate to availability handler routing
@@ -368,6 +386,607 @@ async function handleTicketDataTest(env: Env): Promise<Response> {
 			message: 'Ticket data test failed',
 			error: (error as Error).message,
 			endpoint: '/test/ticket-data'
+		}), {
+			headers: { 'Content-Type': 'application/json' },
+			status: 500
+		});
+	}
+}
+
+async function handleEventConfigTest(env: Env): Promise<Response> {
+	try {
+		log('info', 'Starting event configuration test');
+		
+		// Check all event ID environment variables
+		const eventConfig: any = {
+			timestamp: new Date().toISOString(),
+			endpoint: '/test/event-config',
+			regions: {}
+		};
+		
+		// Map of region to event environment variable prefixes (copied from availability.ts)
+		const regionEventMap: Record<string, string[]> = {
+			'DACH': ['FRANKFURT', 'HAMBURG', 'STUTTGART', 'VIENNA', 'KOLN'],
+			'FRANCE': ['PARIS', 'BORDEAUX', 'TOULOUSE', 'NICE', 'LYON', 'PARISGRANDPALAIS'],
+			'ITALY': ['ROME', 'VERONA', 'TURIN', 'BOLOGNA'],
+			'BENELUX': ['MAASTRICHT', 'UTRECHT', 'AMSTERDAM', 'BELGIUM', 'ROTTERDAM'],
+			'SWITZERLAND': ['GENEVA', 'STGALLEN'],
+			'USA': ['CHICAGO', 'DALLAS', 'ANAHEIM', 'PHOENIX', 'LASVEGAS', 'MIAMIBEACH', 'WASHINGTONDC', 'ATLANTA25'],
+			'CANADA': ['TORONTO'],
+			'AUSTRALIA': ['PERTH', 'MELBOURNE', 'BRISBANE', 'AUCKLAND'],
+			'NORWAY': ['OSLO', 'STOCKHOLM', 'COPENHAGEN']
+		};
+		
+		for (const [region, prefixes] of Object.entries(regionEventMap)) {
+			const regionEvents: any = {};
+			for (const prefix of prefixes) {
+				const envVar = `${prefix}_EVENT`;
+				const eventId = env[envVar as keyof Env] as string;
+				regionEvents[envVar] = eventId || 'NOT_SET';
+			}
+			eventConfig.regions[region] = regionEvents;
+		}
+		
+		// Count configured events
+		let totalConfigured = 0;
+		for (const region of Object.values(eventConfig.regions)) {
+			for (const eventId of Object.values(region as any)) {
+				if (eventId && eventId !== 'NOT_SET' && !eventId.toString().startsWith('your_')) {
+					totalConfigured++;
+				}
+			}
+		}
+		
+		eventConfig.summary = {
+			totalConfigured,
+			status: totalConfigured > 0 ? 'success' : 'no_events_configured'
+		};
+		
+		return new Response(JSON.stringify(eventConfig, null, 2), {
+			headers: {
+				'Content-Type': 'application/json',
+				'Cache-Control': 'no-cache'
+			},
+			status: 200
+		});
+		
+	} catch (error) {
+		log('error', 'Event config test failed', {
+			error: (error as Error).message,
+			stack: (error as Error).stack
+		});
+		
+		return new Response(JSON.stringify({
+			status: 'failed',
+			timestamp: new Date().toISOString(),
+			message: 'Event config test failed',
+			error: (error as Error).message,
+			endpoint: '/test/event-config'
+		}), {
+			headers: { 'Content-Type': 'application/json' },
+			status: 500
+		});
+	}
+}
+
+async function handleVivenuEventsTest(env: Env): Promise<Response> {
+	try {
+		log('info', 'Starting Vivenu events test');
+		
+		// Get Vivenu clients
+		const clients = createVivenuClients(env);
+		if (clients.length === 0) {
+			throw new Error('No Vivenu API clients available - check API key configuration');
+		}
+		
+		const results: any = {
+			timestamp: new Date().toISOString(),
+			endpoint: '/test/vivenu-events',
+			regions: {}
+		};
+		
+		// Test each region
+		for (const client of clients) {
+			try {
+				log('info', `Testing ${client.region} region`);
+				
+				const allEvents = await client.getAllEvents();
+				
+				const regionResult: any = {
+					totalEvents: allEvents.length,
+					eventNames: allEvents.slice(0, 10).map(e => ({ 
+						name: e.name, 
+						id: e._id,
+						hasTickets: !!e.tickets && e.tickets.length > 0,
+						ticketCount: e.tickets ? e.tickets.length : 0
+					})),
+					hyroxEvents: [],
+					charityEvents: []
+				};
+				
+				// Find HYROX events
+				const hyroxEvents = allEvents.filter(event => 
+					event.name.toLowerCase().includes('hyrox') || 
+					event.name.toLowerCase().includes('race')
+				);
+				regionResult.hyroxEvents = hyroxEvents.map(e => ({
+					name: e.name,
+					id: e._id,
+					hasTickets: !!e.tickets && e.tickets.length > 0
+				}));
+				
+				// Find events with charity tickets
+				const charityEvents = allEvents.filter(event => {
+					if (!event.tickets) return false;
+					return event.tickets.some(ticket => 
+						ticket.active && (
+							ticket.name.toLowerCase().includes('charity') ||
+							ticket.name.toLowerCase().includes('donation') ||
+							ticket.name.toLowerCase().includes('good cause')
+						)
+					);
+				});
+				regionResult.charityEvents = charityEvents.map(e => ({
+					name: e.name,
+					id: e._id,
+					charityTickets: e.tickets?.filter(t => 
+						t.active && (
+							t.name.toLowerCase().includes('charity') ||
+							t.name.toLowerCase().includes('donation') ||
+							t.name.toLowerCase().includes('good cause')
+						)
+					).map(t => t.name) || []
+				}));
+				
+				results.regions[client.region] = regionResult;
+				
+				log('info', `${client.region}: ${allEvents.length} events, ${hyroxEvents.length} HYROX, ${charityEvents.length} with charity`);
+			} catch (error) {
+				results.regions[client.region] = {
+					error: (error as Error).message
+				};
+				log('error', `Failed to test ${client.region}`, {
+					error: (error as Error).message
+				});
+			}
+		}
+		
+		return new Response(JSON.stringify(results, null, 2), {
+			headers: {
+				'Content-Type': 'application/json',
+				'Cache-Control': 'no-cache'
+			},
+			status: 200
+		});
+		
+	} catch (error) {
+		log('error', 'Vivenu events test failed', {
+			error: (error as Error).message,
+			stack: (error as Error).stack
+		});
+		
+		return new Response(JSON.stringify({
+			status: 'failed',
+			timestamp: new Date().toISOString(),
+			message: 'Vivenu events test failed',
+			error: (error as Error).message,
+			endpoint: '/test/vivenu-events'
+		}), {
+			headers: { 'Content-Type': 'application/json' },
+			status: 500
+		});
+	}
+}
+
+async function handleVivenuSpecificEventTest(env: Env): Promise<Response> {
+	try {
+		log('info', 'Starting Vivenu specific event test');
+		
+		// Test with known event ID from Python scripts
+		const ATLANTA25_EVENT_ID = "6894f94a097ce9a51c15cef4";
+		
+		const clients = createVivenuClients(env);
+		const usaClient = clients.find(client => client.region === 'USA');
+		
+		if (!usaClient) {
+			throw new Error('USA API client not available - check USA_API key configuration');
+		}
+		
+		const results: any = {
+			timestamp: new Date().toISOString(),
+			endpoint: '/test/vivenu-specific-event',
+			testEventId: ATLANTA25_EVENT_ID,
+			region: 'USA'
+		};
+		
+		try {
+			log('info', `Testing specific event: ${ATLANTA25_EVENT_ID}`);
+			
+			// Test with the corrected API call pattern
+			const metrics = await usaClient.getTicketMetrics(ATLANTA25_EVENT_ID);
+			
+			if (metrics) {
+				results.status = 'success';
+				results.eventData = {
+					eventId: metrics.eventId,
+					eventName: metrics.eventName,
+					eventDate: metrics.eventDate,
+					region: metrics.region,
+					totalCapacity: metrics.totalCapacity,
+					totalSold: metrics.totalSold,
+					totalAvailable: metrics.totalAvailable,
+					percentSold: metrics.percentSold,
+					ticketTypesCount: metrics.ticketTypes.length,
+					ticketTypes: metrics.ticketTypes.map(tt => ({
+						name: tt.name,
+						capacity: tt.capacity,
+						sold: tt.sold,
+						available: tt.available
+					}))
+				};
+				
+				log('info', `Successfully fetched specific event: ${metrics.eventName}`, {
+					eventId: metrics.eventId,
+					ticketTypes: metrics.ticketTypes.length,
+					totalCapacity: metrics.totalCapacity,
+					totalSold: metrics.totalSold
+				});
+			} else {
+				results.status = 'failed';
+				results.error = 'getTicketMetrics returned null';
+			}
+			
+		} catch (error) {
+			results.status = 'failed';
+			results.error = (error as Error).message;
+			
+			log('error', `Failed to test specific event ${ATLANTA25_EVENT_ID}`, {
+				error: (error as Error).message,
+				stack: (error as Error).stack
+			});
+		}
+		
+		return new Response(JSON.stringify(results, null, 2), {
+			headers: {
+				'Content-Type': 'application/json',
+				'Cache-Control': 'no-cache'
+			},
+			status: results.status === 'success' ? 200 : 500
+		});
+		
+	} catch (error) {
+		log('error', 'Vivenu specific event test failed', {
+			error: (error as Error).message,
+			stack: (error as Error).stack
+		});
+		
+		return new Response(JSON.stringify({
+			status: 'failed',
+			timestamp: new Date().toISOString(),
+			message: 'Vivenu specific event test failed',
+			error: (error as Error).message,
+			endpoint: '/test/vivenu-specific-event'
+		}), {
+			headers: { 'Content-Type': 'application/json' },
+			status: 500
+		});
+	}
+}
+
+async function handleScrapeAtlantaTest(env: Env): Promise<Response> {
+	try {
+		log('info', 'Starting Atlanta ticket scraping test');
+		
+		// Import AvailabilityService
+		const { AvailabilityService } = await import('./services/availability');
+		
+		// Test with known Atlanta event ID
+		const ATLANTA25_EVENT_ID = "6894f94a097ce9a51c15cef4";
+		
+		// Create availability service for USA region
+		const usaApiKey = env.USA_API;
+		if (!usaApiKey) {
+			throw new Error('USA_API key not configured');
+		}
+		
+		const availabilityService = new AvailabilityService(
+			'USA',
+			usaApiKey,
+			'PROD',
+			env.KV || null,
+			env
+		);
+		
+		const results: any = {
+			timestamp: new Date().toISOString(),
+			endpoint: '/test/scrape-atlanta',
+			testEventId: ATLANTA25_EVENT_ID,
+			region: 'USA',
+			scrapingStarted: new Date().toISOString()
+		};
+		
+		try {
+			log('info', `Starting comprehensive ticket scraping for Atlanta event`);
+			log('warn', `⚠️ This will fetch ALL tickets (potentially 18,000+) and may take 3-5 minutes...`);
+			
+			const startTime = Date.now();
+			
+			// Use the REAL scraping method
+			const availability = await availabilityService.getEventAvailability(ATLANTA25_EVENT_ID, false);
+			
+			const duration = (Date.now() - startTime) / 1000;
+			
+			results.status = 'success';
+			results.scrapingCompleted = new Date().toISOString();
+			results.scrapingDuration = `${duration.toFixed(1)} seconds`;
+			
+			// Extract key data with REAL sold counts
+			results.eventData = {
+				eventId: availability.eventId,
+				eventName: availability.eventName,
+				eventDate: availability.eventDate,
+				region: availability.region,
+				totals: {
+					capacity: availability.totals.capacity,
+					sold: availability.totals.sold,
+					available: availability.totals.available,
+					percentSold: availability.totals.percentSold,
+					status: availability.totals.status
+				},
+				// Add scraping validation info
+				scrapingValidation: availability.scrapingMetadata || {
+					warning: 'Scraping metadata not available'
+				},
+				charityStats: availability.charityStats,
+				ticketTypesCount: availability.ticketTypes.length,
+				// Show a few charity ticket types with REAL sold counts
+				charityTicketSamples: availability.ticketTypes
+					.filter(tt => tt.name.toLowerCase().includes('charity'))
+					.slice(0, 5)
+					.map(tt => ({
+						name: tt.name,
+						capacity: tt.capacity,
+						sold: tt.sold,  // THIS SHOULD HAVE REAL COUNTS NOW!
+						available: tt.available,
+						percentSold: tt.percentSold
+					}))
+			};
+			
+			log('info', `✅ Scraping completed successfully`, {
+				eventId: ATLANTA25_EVENT_ID,
+				duration: `${duration}s`,
+				totalSold: availability.totals.sold,
+				totalCapacity: availability.totals.capacity,
+				percentSold: availability.totals.percentSold
+			});
+			
+		} catch (error) {
+			results.status = 'failed';
+			results.error = (error as Error).message;
+			results.scrapingCompleted = new Date().toISOString();
+			
+			log('error', `Failed to scrape Atlanta event`, {
+				error: (error as Error).message,
+				stack: (error as Error).stack
+			});
+		}
+		
+		return new Response(JSON.stringify(results, null, 2), {
+			headers: {
+				'Content-Type': 'application/json',
+				'Cache-Control': 'no-cache'
+			},
+			status: results.status === 'success' ? 200 : 500
+		});
+		
+	} catch (error) {
+		log('error', 'Atlanta scraping test failed', {
+			error: (error as Error).message,
+			stack: (error as Error).stack
+		});
+		
+		return new Response(JSON.stringify({
+			status: 'failed',
+			timestamp: new Date().toISOString(),
+			message: 'Atlanta scraping test failed',
+			error: (error as Error).message,
+			endpoint: '/test/scrape-atlanta'
+		}), {
+			headers: { 'Content-Type': 'application/json' },
+			status: 500
+		});
+	}
+}
+
+async function handleScrapeValidationTest(env: Env): Promise<Response> {
+	try {
+		log('info', 'Starting scraping validation test');
+		
+		// Import needed classes
+		const { TicketScraper } = await import('./services/ticket-scraper');
+		
+		// Test with known Atlanta event ID
+		const ATLANTA25_EVENT_ID = "6894f94a097ce9a51c15cef4";
+		
+		// Create ticket scraper directly
+		const scraper = new TicketScraper('USA', env);
+		
+		const results: any = {
+			timestamp: new Date().toISOString(),
+			endpoint: '/test/scrape-validation',
+			testEventId: ATLANTA25_EVENT_ID,
+			region: 'USA'
+		};
+		
+		try {
+			log('info', `Starting direct ticket scraping for validation`);
+			
+			const startTime = Date.now();
+			
+			// Scrape tickets directly
+			const scrapingResult = await scraper.scrapeAllTickets(ATLANTA25_EVENT_ID);
+			
+			const duration = (Date.now() - startTime) / 1000;
+			
+			// Get ticket type counts
+			const ticketTypeCounts = scraper.getTicketTypeCounts(scrapingResult);
+			
+			// Calculate total sold from scraped tickets
+			const totalSold = ticketTypeCounts.reduce((sum, tt) => sum + tt.soldCount, 0);
+			
+			results.status = 'success';
+			results.scrapingDuration = `${duration.toFixed(1)} seconds`;
+			
+			// Validation details
+			results.validation = {
+				ticketsFetched: scrapingResult.totalFetched,
+				expectedTotal: scrapingResult.expectedTotal,
+				completionRate: `${scrapingResult.completionRate.toFixed(1)}%`,
+				isComplete: scrapingResult.completionRate >= 95,
+				warning: scrapingResult.completionRate < 95 ? 
+					`⚠️ Only got ${scrapingResult.completionRate.toFixed(1)}% of expected tickets!` : null
+			};
+			
+			// Ticket breakdown
+			results.ticketAnalysis = {
+				totalTicketsScraped: scrapingResult.tickets.length,
+				primaryTicketsSold: totalSold,
+				uniqueTicketTypes: ticketTypeCounts.length,
+				topSellingTypes: ticketTypeCounts.slice(0, 5).map(tt => ({
+					name: tt.ticketName,
+					sold: tt.soldCount
+				}))
+			};
+			
+			// Sample of actual ticket data
+			results.sampleTickets = scrapingResult.tickets.slice(0, 3).map(t => ({
+				id: t._id,
+				ticketName: t.ticketName,
+				buyerName: t.name,
+				status: t.status,
+				createdAt: t.createdAt
+			}));
+			
+			log('info', `✅ Validation complete`, {
+				fetched: scrapingResult.totalFetched,
+				expected: scrapingResult.expectedTotal,
+				completionRate: `${scrapingResult.completionRate}%`
+			});
+			
+			// Highlight any issues
+			if (scrapingResult.completionRate < 95) {
+				results.validation.error = 'INCOMPLETE_SCRAPING';
+				results.validation.message = `Missing approximately ${scrapingResult.expectedTotal - scrapingResult.totalFetched} tickets`;
+			}
+			
+		} catch (error) {
+			results.status = 'failed';
+			results.error = (error as Error).message;
+			
+			log('error', `Scraping validation failed`, {
+				error: (error as Error).message,
+				stack: (error as Error).stack
+			});
+		}
+		
+		return new Response(JSON.stringify(results, null, 2), {
+			headers: {
+				'Content-Type': 'application/json',
+				'Cache-Control': 'no-cache'
+			},
+			status: results.status === 'success' ? 200 : 500
+		});
+		
+	} catch (error) {
+		log('error', 'Scraping validation test failed', {
+			error: (error as Error).message,
+			stack: (error as Error).stack
+		});
+		
+		return new Response(JSON.stringify({
+			status: 'failed',
+			timestamp: new Date().toISOString(),
+			message: 'Scraping validation test failed',
+			error: (error as Error).message,
+			endpoint: '/test/scrape-validation'
+		}), {
+			headers: { 'Content-Type': 'application/json' },
+			status: 500
+		});
+	}
+}
+
+async function handlePostgresConnectionTest(env: Env): Promise<Response> {
+	try {
+		log('info', 'Starting PostgreSQL connection test');
+		
+		const { PostgresClient } = await import('./services/postgres');
+		
+		const result: any = {
+			timestamp: new Date().toISOString(),
+			endpoint: '/test/postgres-connection',
+			status: 'unknown'
+		};
+		
+		// Check if DATABASE_URL is configured
+		if (!env.DATABASE_URL) {
+			result.status = 'not_configured';
+			result.message = 'DATABASE_URL environment variable not set';
+			result.configuration = {
+				required: 'Add DATABASE_URL to your .dev.vars file for local development',
+				production: 'Set DATABASE_URL as a Cloudflare Worker secret using: npx wrangler secret put DATABASE_URL'
+			};
+		} else {
+			try {
+				// Create PostgreSQL client
+				const postgres = new PostgresClient(env.DATABASE_URL);
+				
+				// Test basic connection
+				const startTime = Date.now();
+				const connectionTest = await postgres.testConnection();
+				const duration = Date.now() - startTime;
+				
+				if (connectionTest) {
+					result.status = 'success';
+					result.message = 'PostgreSQL connection successful';
+					result.connectionTime = `${duration}ms`;
+					result.database = {
+						configured: true,
+						responsive: true
+					};
+				} else {
+					result.status = 'connection_failed';
+					result.message = 'PostgreSQL connection test failed';
+					result.connectionTime = `${duration}ms`;
+				}
+				
+			} catch (error) {
+				result.status = 'error';
+				result.message = 'PostgreSQL connection error';
+				result.error = (error as Error).message;
+			}
+		}
+		
+		return new Response(JSON.stringify(result, null, 2), {
+			headers: {
+				'Content-Type': 'application/json',
+				'Cache-Control': 'no-cache'
+			},
+			status: result.status === 'success' ? 200 : 500
+		});
+		
+	} catch (error) {
+		log('error', 'PostgreSQL connection test failed', {
+			error: (error as Error).message,
+			stack: (error as Error).stack
+		});
+		
+		return new Response(JSON.stringify({
+			status: 'failed',
+			timestamp: new Date().toISOString(),
+			message: 'PostgreSQL connection test failed',
+			error: (error as Error).message,
+			endpoint: '/test/postgres-connection'
 		}), {
 			headers: { 'Content-Type': 'application/json' },
 			status: 500
